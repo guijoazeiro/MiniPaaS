@@ -1,0 +1,41 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test & coverage
+*.test
+*.out
+coverage.*
+profile.*
+
+# Go workspace / vendor
+go.work
+go.work.sum
+vendor/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Dependency directories (Node — dashboard)
+node_modules/
+.next/
+out/
+.pnpm-store/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

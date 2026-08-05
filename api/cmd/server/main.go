@@ -1,0 +1,106 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
+	"github.com/joho/godotenv"
+)
+
+func main() {
+	for _, p := range []string{".env", "../.env"} {
+		_ = godotenv.Load(p)
+	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	cfg, err := config.Load()
+	if err != nil {
+		log.Error("config", "err", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Error("postgres.Connect", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	if cfg.LogLevel != "debug" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	r := gin.New()
+	r.Use(gin.Recovery(), requestLogger(log), cors())
+
+	r.GET("/health", func(c *gin.Context) {
+		if err := pool.Ping(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "degraded", "db": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	srv := &http.Server{
+		Addr:              cfg.Port,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.Info("http listening", "addr", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("http", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	log.Info("shutting down")
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error("shutdown", "err", err)
+	}
+}
+
+func requestLogger(log *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		log.Info("http",
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"status", c.Writer.Status(),
+			"dur_ms", time.Since(start).Milliseconds(),
+		)
+	}
+}
+
+func cors() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
