@@ -171,14 +171,16 @@ SET status       = 'running',
     container_id = $1,
     port         = $2,
     image_tag    = $3,
+    duration_ms  = $4,
     finished_at  = now()
-WHERE id = $4
+WHERE id = $5
 `
 
 type UpdateDeploymentRunningParams struct {
 	ContainerID pgtype.Text `json:"container_id"`
 	Port        pgtype.Int4 `json:"port"`
 	ImageTag    string      `json:"image_tag"`
+	DurationMs  pgtype.Int4 `json:"duration_ms"`
 	ID          pgtype.UUID `json:"id"`
 }
 
@@ -187,6 +189,7 @@ func (q *Queries) UpdateDeploymentRunning(ctx context.Context, arg UpdateDeploym
 		arg.ContainerID,
 		arg.Port,
 		arg.ImageTag,
+		arg.DurationMs,
 		arg.ID,
 	)
 	return err

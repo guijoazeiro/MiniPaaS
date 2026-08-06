@@ -53,10 +53,10 @@ func (s *DeploymentStore) GetActive(ctx context.Context, appID uuid.UUID) (domai
 	return toDomainDeployment(row), nil
 }
 
-func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit int32) ([]domain.Deployment, error) {
+func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error) {
 	rows, err := s.q.ListDeploymentsByApp(ctx, sqlc.ListDeploymentsByAppParams{
 		AppID: uuidToPG(appID),
-		Lim:   limit,
+		Lim:   int32(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store.ListDeploymentsByApp: %w", err)
@@ -68,12 +68,13 @@ func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit 
 	return out, nil
 }
 
-func (s *DeploymentStore) UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string) error {
+func (s *DeploymentStore) UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error {
 	err := s.q.UpdateDeploymentRunning(ctx, sqlc.UpdateDeploymentRunningParams{
 		ID:          uuidToPG(id),
 		ContainerID: pgtype.Text{String: containerID, Valid: true},
 		Port:        pgtype.Int4{Int32: int32(port), Valid: true},
 		ImageTag:    imageTag,
+		DurationMs:  pgtype.Int4{Int32: int32(durationMs), Valid: true},
 	})
 	if err != nil {
 		return fmt.Errorf("store.UpdateDeploymentRunning: %w", err)

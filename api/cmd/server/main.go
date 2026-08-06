@@ -57,9 +57,8 @@ func main() {
 
 	appSvc := service.NewAppService(appStore)
 	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, log)
-	facade := &service.AppFacade{App: appSvc, Dep: depSvc}
 
-	appH := handler.NewAppHandler(facade, log)
+	appH := handler.NewAppHandler(appSvc, depSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {

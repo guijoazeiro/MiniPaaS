@@ -15,16 +15,20 @@ type AppService interface {
 	GetByName(ctx context.Context, name string) (domain.App, error)
 	List(ctx context.Context) ([]domain.App, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type AppStopper interface {
 	StopApp(ctx context.Context, id uuid.UUID) error
 }
 
 type AppHandler struct {
-	svc AppService
-	log *slog.Logger
+	svc     AppService
+	stopper AppStopper
+	log     *slog.Logger
 }
 
-func NewAppHandler(svc AppService, log *slog.Logger) *AppHandler {
-	return &AppHandler{svc: svc, log: log}
+func NewAppHandler(svc AppService, stopper AppStopper, log *slog.Logger) *AppHandler {
+	return &AppHandler{svc: svc, stopper: stopper, log: log}
 }
 
 type createAppReq struct {
@@ -72,7 +76,7 @@ func (h *AppHandler) Delete(c *gin.Context) {
 		respondError(c, h.log, err)
 		return
 	}
-	if err := h.svc.StopApp(c.Request.Context(), app.ID); err != nil {
+	if err := h.stopper.StopApp(c.Request.Context(), app.ID); err != nil {
 		h.log.Warn("stop app", "app", app.Name, "err", err)
 	}
 	if err := h.svc.Delete(c.Request.Context(), app.ID); err != nil {
