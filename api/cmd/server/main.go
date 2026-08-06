@@ -7,12 +7,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/service"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	"github.com/joho/godotenv"
 )
 
@@ -39,11 +44,29 @@ func main() {
 	}
 	defer pool.Close()
 
-	if cfg.LogLevel != "debug" {
+	dockerCli, err := docker.New(cfg.DockerHost)
+	if err != nil {
+		log.Error("docker.New", "err", err)
+		os.Exit(1)
+	}
+	defer dockerCli.Close()
+
+	q := sqlc.New(pool)
+	appStore := postgres.NewAppStore(q)
+	depStore := postgres.NewDeploymentStore(q)
+
+	appSvc := service.NewAppService(appStore)
+	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, log)
+	facade := &service.AppFacade{App: appSvc, Dep: depSvc}
+
+	appH := handler.NewAppHandler(facade, log)
+	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
+
+	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger(log), cors())
+	r.Use(gin.Recovery(), requestLogger(log), corsMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := pool.Ping(c.Request.Context()); err != nil {
@@ -52,6 +75,15 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	r.POST("/apps", appH.Create)
+	r.GET("/apps", appH.List)
+	r.GET("/apps/:name", appH.Get)
+	r.DELETE("/apps/:name", appH.Delete)
+
+	r.POST("/apps/:name/deployments", depH.Create)
+	r.GET("/apps/:name/deployments", depH.List)
+	r.GET("/apps/:name/deployments/:id", depH.Get)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,
@@ -92,7 +124,7 @@ func requestLogger(log *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-func cors() gin.HandlerFunc {
+func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")

@@ -26,7 +26,7 @@ func Load() (*Config, error) {
 	return &Config{
 		Port:          env("PORT", ":8080"),
 		DatabaseURL:   mustEnv("DATABASE_URL"),
-		DockerHost:    env("DOCKER_HOST", "unix:///var/run/docker.sock"),
+		DockerHost:    os.Getenv("DOCKER_HOST"),
 		CaddyAdminURL: env("CADDY_ADMIN_URL", "http://localhost:2019"),
 		BaseDomain:    mustEnv("BASE_DOMAIN"),
 		EncryptionKey: encKey,
