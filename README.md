@@ -9,8 +9,8 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | Phase | Focus | State |
 |---|---|---|
 | 0 | Foundation (API skeleton, migrations, sqlc, Postgres) | ✅ done |
-| 1 | Docker orchestration + deploy via CLI | ⏳ next |
-| 2 | Dynamic reverse proxy (Caddy) + HTTPS | — |
+| 1 | Docker orchestration + deploy via CLI | ✅ done |
+| 2 | Dynamic reverse proxy (Caddy) + HTTPS | ⏳ next |
 | 3 | Auth (JWT) + encrypted env vars (AES-256-GCM) | — |
 | 4 | WebSocket log streaming | — |
 | 5 | Rollback | — |
@@ -28,18 +28,18 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | Migrations | [golang-migrate](https://github.com/golang-migrate/migrate) | Versioned, reversible |
 | Container runtime | Docker Engine API (Go SDK) | No Kubernetes — this runs on a $6 VPS |
 | Reverse proxy | Caddy (Admin API) | Runtime route changes without config reloads; auto-ACME |
-| CLI | Go + Cobra | Same binary target as the server |
+| CLI | Go + Cobra | Single-binary target, easy release |
 | Dashboard | Next.js 14 (App Router) | Ships last, consumes the same API as the CLI |
 
 ## Quick start
 
-Prerequisites: Go 1.22+, Docker, [sqlc](https://sqlc.dev), and [golang-migrate](https://github.com/golang-migrate/migrate) *(only if you want to run migrations outside the API — otherwise `cmd/migrate` handles it)*.
+Prerequisites: Go 1.26+, Docker Desktop / Engine, [sqlc](https://sqlc.dev).
 
 ```bash
 git clone https://github.com/guijoazeiro/minipaas
 cd minipaas
 cp .env.example .env
-# generate a real key: openssl rand -hex 32 → replace ENCRYPTION_KEY in .env
+# generate a real key: openssl rand -hex 32 → paste into ENCRYPTION_KEY
 ```
 
 Start Postgres:
@@ -57,10 +57,51 @@ go run ./cmd/migrate up
 go run ./cmd/server
 ```
 
+Build and use the CLI:
+
 ```bash
-curl localhost:8080/health
-# {"status":"ok"}
+cd cli
+go build -o minip .
+./minip apps create hello
+./minip deploy ../hello-world --app hello --wait
 ```
+
+The last command tars the directory, uploads it, builds the image, starts a container on a random host port, and returns the port so you can `curl localhost:<port>`.
+
+## API (phase 1)
+
+All endpoints are unauthenticated until phase 3.
+
+```
+GET    /health
+POST   /apps                          { name } → App
+GET    /apps                          → []App
+GET    /apps/:name                    → App
+DELETE /apps/:name                    → 204   (stops container, removes row)
+POST   /apps/:name/deployments        multipart source=<tar> → 202 Deployment
+GET    /apps/:name/deployments        → []Deployment
+GET    /apps/:name/deployments/:id    → Deployment
+```
+
+Deployment status transitions:
+
+```
+pending → building → running    (happy path)
+                   ↘ failed     (build or start failed)
+running           → superseded  (replaced by a newer deploy)
+                  → rolled_back (intentional rollback — phase 5)
+```
+
+## CLI (phase 1)
+
+```bash
+minip apps create <name>              # create app
+minip apps list                       # list apps
+minip deploy [path] --app <name>      # tarball + upload (default path = .)
+minip deploy ... --wait               # poll until running or failed
+```
+
+Config: `--host` flag or `MINIPAAS_HOST` env (defaults to `http://localhost:8080`).
 
 ## Project layout
 
@@ -72,8 +113,12 @@ minipaas/
 │   │   └── migrate/        # golang-migrate runner
 │   ├── internal/
 │   │   ├── config/         # env → struct
-│   │   ├── store/postgres/ # concrete stores (+ sqlc/ generated code)
-│   │   ├── docker/         # Docker Engine wrapper (phase 1)
+│   │   ├── domain/         # pure types + sentinel errors (App, Deployment...)
+│   │   ├── store/          # store interfaces
+│   │   │   └── postgres/   # concrete stores (+ sqlc/ generated code)
+│   │   ├── docker/         # Docker Engine wrapper (build, run, stop, logs)
+│   │   ├── service/        # business logic (app, deployment)
+│   │   ├── handler/        # Gin handlers (translate domain errors → HTTP)
 │   │   ├── caddy/          # Caddy Admin wrapper (phase 2)
 │   │   ├── crypto/         # AES-256-GCM (phase 3)
 │   │   └── ws/             # WebSocket log stream (phase 4)
@@ -81,32 +126,41 @@ minipaas/
 │   │   ├── migrations/     # golang-migrate files (*.up.sql / *.down.sql)
 │   │   └── queries/        # sqlc source queries
 │   └── sqlc.yaml
-├── cli/                    # minip CLI (phase 1+)
+├── cli/                    # separate Go module — Cobra CLI
+│   ├── cmd/                # root, apps, deploy
+│   ├── internal/
+│   │   ├── api/            # HTTP client
+│   │   └── tarball/        # dir → tar packer
+│   └── main.go
 ├── dashboard/              # Next.js UI (phase 7)
+├── hello-world/            # tiny sample app for smoke-testing deploys
 ├── docker-compose.yml      # Postgres for local dev
 └── .env.example
 ```
 
 ## Configuration
 
-All configuration lives in environment variables, loaded from `.env` at startup.
+All configuration lives in environment variables, loaded from `.env` at startup. Both the server and the migrate runner look for `.env` in the current directory and one level up, so running from either the repo root or `api/` works.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | Postgres DSN |
-| `BASE_DOMAIN` | yes | — | e.g. `minipaas.yourdomain.com` — apps become `<name>.<BASE_DOMAIN>` |
+| `BASE_DOMAIN` | yes | — | e.g. `minipaas.yourdomain.com` — apps become `<name>.<BASE_DOMAIN>` (phase 2) |
 | `ENCRYPTION_KEY` | yes | — | 32-byte hex (64 chars). Generate with `openssl rand -hex 32` |
-| `JWT_SECRET` | yes | — | Signing secret for auth tokens |
+| `JWT_SECRET` | yes | — | Signing secret for auth tokens (phase 3) |
 | `PORT` | no | `:8080` | HTTP listen address |
-| `DOCKER_HOST` | no | `unix:///var/run/docker.sock` | Docker Engine endpoint |
+| `DOCKER_HOST` | no | auto-detect | Leave unset for the Docker SDK to pick the OS default (npipe on Windows, unix socket on Linux/Mac) |
 | `CADDY_ADMIN_URL` | no | `http://localhost:2019` | Must be localhost — never expose publicly |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
 
 ## Development
 
 ```bash
+# API
+cd api
+
 # Regenerate sqlc code after editing sql/queries/*.sql or sql/migrations/*.sql
-cd api && sqlc generate
+sqlc generate
 
 # Migrations
 go run ./cmd/migrate up            # apply all pending
@@ -117,6 +171,10 @@ go run ./cmd/migrate force <v>     # unlock a dirty state
 # Build binaries
 go build -o bin/server  ./cmd/server
 go build -o bin/migrate ./cmd/migrate
+
+# CLI (separate module)
+cd ../cli
+go build -o minip .
 
 # Tests (once they exist)
 go test ./... -race
