@@ -24,6 +24,7 @@ SET status       = 'running',
     container_id = @container_id,
     port         = @port,
     image_tag    = @image_tag,
+    duration_ms  = @duration_ms,
     finished_at  = now()
 WHERE id = @id;
 

@@ -48,7 +48,7 @@ func (s *DeploymentService) Get(ctx context.Context, id uuid.UUID) (domain.Deplo
 	return s.deps.GetByID(ctx, id)
 }
 
-func (s *DeploymentService) ListByApp(ctx context.Context, appID uuid.UUID, limit int32) ([]domain.Deployment, error) {
+func (s *DeploymentService) ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -81,7 +81,7 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		if err := s.docker.RemoveContainer(ctx, prev.ContainerID); err != nil {
 			s.log.Warn("remove previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
 		}
-		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusRolledBack)
+		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
 	}
 
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
@@ -93,7 +93,8 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		return fmt.Errorf("service.RunBuild: run container: %w", err)
 	}
 
-	if err := s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag); err != nil {
+	durationMs := int(time.Since(start).Milliseconds())
+	if err := s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs); err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: mark running: %w", err)
 	}
@@ -125,7 +126,7 @@ func (s *DeploymentService) StopApp(ctx context.Context, appID uuid.UUID) error 
 	if err := s.docker.RemoveContainer(ctx, dep.ContainerID); err != nil {
 		return fmt.Errorf("service.StopApp: %w", err)
 	}
-	return s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusRolledBack)
+	return s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusSuperseded)
 }
 
 func (s *DeploymentService) markFailed(ctx context.Context, depID, appID uuid.UUID) {

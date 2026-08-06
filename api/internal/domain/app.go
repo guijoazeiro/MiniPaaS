@@ -29,6 +29,7 @@ const (
 	DeploymentStatusBuilding   DeploymentStatus = "building"
 	DeploymentStatusRunning    DeploymentStatus = "running"
 	DeploymentStatusFailed     DeploymentStatus = "failed"
+	DeploymentStatusSuperseded DeploymentStatus = "superseded"
 	DeploymentStatusRolledBack DeploymentStatus = "rolled_back"
 )
 
