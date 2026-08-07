@@ -1,31 +1,49 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/guijoazeiro/MiniPaaS/cli/internal/api"
+	cfgpkg "github.com/guijoazeiro/MiniPaaS/cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var (
-	host      string
+	hostFlag  string
 	apiClient *api.Client
+	stored    *cfgpkg.Config
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "minip",
 	Short: "MiniPaaS CLI",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if h := os.Getenv("MINIPAAS_HOST"); h != "" && host == "http://localhost:8080" {
-			host = h
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		c, err := cfgpkg.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "warning: config load:", err)
+			c = &cfgpkg.Config{}
 		}
-		apiClient = api.New(host)
+		stored = c
+
+		host := hostFlag
+		if host == "" {
+			if v := os.Getenv("MINIPAAS_HOST"); v != "" {
+				host = v
+			} else if c.Host != "" {
+				host = c.Host
+			} else {
+				host = "http://localhost:8080"
+			}
+		}
+		apiClient = api.New(host, c.Token)
+		return nil
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&host, "host", "http://localhost:8080", "MiniPaaS API URL (or set MINIPAAS_HOST)")
-	rootCmd.AddCommand(appsCmd, deployCmd)
+	rootCmd.PersistentFlags().StringVar(&hostFlag, "host", "", "MiniPaaS API URL (overrides saved config and MINIPAAS_HOST)")
+	rootCmd.AddCommand(appsCmd, deployCmd, loginCmd, envCmd)
 }
 
 func Execute() error {

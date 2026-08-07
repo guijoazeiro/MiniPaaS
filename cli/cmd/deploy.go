@@ -38,7 +38,7 @@ var deployCmd = &cobra.Command{
 			_ = pw.CloseWithError(err)
 		}()
 
-		fmt.Fprintf(os.Stderr, "uploading to %s...\n", host)
+		fmt.Fprintf(os.Stderr, "uploading to %s...\n", apiClient.Host())
 		dep, err := apiClient.Deploy(deployApp, pr)
 		if err != nil {
 			return err
@@ -67,7 +67,7 @@ func waitForDeployment(app, id string) error {
 			fmt.Fprintf(os.Stderr, "  status=%s\n", d.Status)
 			switch d.Status {
 			case "running":
-				fmt.Printf("running on host port %d\n", d.Port)
+				fmt.Printf("running on hostFlag port %d\n", d.Port)
 				return nil
 			case "failed":
 				return fmt.Errorf("deployment failed")

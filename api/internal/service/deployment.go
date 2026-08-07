@@ -25,16 +25,21 @@ type CaddyRouter interface {
 	RemoveRoute(ctx context.Context, appName string) error
 }
 
+type EnvDecryptor interface {
+	Decrypted(ctx context.Context, appID uuid.UUID) (map[string]string, error)
+}
+
 type DeploymentService struct {
 	deps   store.DeploymentStore
 	apps   store.AppStore
 	docker DockerRunner
 	caddy  CaddyRouter
+	env    EnvDecryptor
 	log    *slog.Logger
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, dk DockerRunner, cd CaddyRouter, log *slog.Logger) *DeploymentService {
-	return &DeploymentService{deps: deps, apps: apps, docker: dk, caddy: cd, log: log}
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, log *slog.Logger) *DeploymentService {
+	return &DeploymentService{deps: deps, apps: apps, docker: dk, caddy: cd, env: env, log: log}
 }
 
 func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.Deployment, domain.App, error) {
@@ -90,9 +95,16 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
 	}
 
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
+	}
+
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image: dep.ImageTag,
 		Name:  fmt.Sprintf("minipaas-%s", app.Name),
+		Env:   envVars,
 	})
 	if err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -16,6 +17,9 @@ type Config struct {
 	BaseDomain    string
 	EncryptionKey []byte
 	JWTSecret     string
+	TokenTTL      time.Duration
+	AdminUsername string
+	AdminPassword string
 	LogLevel      string
 }
 
@@ -30,6 +34,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: CADDY_ADMIN_URL: %w", err)
 	}
 
+	ttl, err := time.ParseDuration(env("TOKEN_TTL", "24h"))
+	if err != nil {
+		return nil, fmt.Errorf("config: TOKEN_TTL: %w", err)
+	}
+
 	return &Config{
 		Port:          env("PORT", ":8080"),
 		DatabaseURL:   mustEnv("DATABASE_URL"),
@@ -38,6 +47,9 @@ func Load() (*Config, error) {
 		BaseDomain:    mustEnv("BASE_DOMAIN"),
 		EncryptionKey: encKey,
 		JWTSecret:     mustEnv("JWT_SECRET"),
+		TokenTTL:      ttl,
+		AdminUsername: os.Getenv("ADMIN_USERNAME"),
+		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
 		LogLevel:      env("LOG_LEVEL", "info"),
 	}, nil
 
