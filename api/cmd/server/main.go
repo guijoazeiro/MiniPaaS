@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/caddy"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
@@ -51,12 +52,17 @@ func main() {
 	}
 	defer dockerCli.Close()
 
+	caddyCli := caddy.New(cfg.CaddyAdminURL, cfg.BaseDomain)
+	if err := caddyCli.EnsureBase(ctx); err != nil {
+		log.Warn("caddy.EnsureBase (proxy may be down; deploys will still record but skip routes)", "err", err)
+	}
+
 	q := sqlc.New(pool)
 	appStore := postgres.NewAppStore(q)
 	depStore := postgres.NewDeploymentStore(q)
 
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, log)
+	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, caddyCli, log)
 
 	appH := handler.NewAppHandler(appSvc, depSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log)

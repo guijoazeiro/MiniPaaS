@@ -45,6 +45,47 @@ var appsListCmd = &cobra.Command{
 	},
 }
 
+var appsInfoCmd = &cobra.Command{
+	Use:   "info <name>",
+	Short: "Show app status, public URL, and recent deployments",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		app, err := apiClient.GetApp(name)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", app.Name)
+		fmt.Printf("  status:  %s\n", app.Status)
+		if app.PublicURL != "" {
+			fmt.Printf("  url:     %s\n", app.PublicURL)
+		}
+		fmt.Printf("  id:      %s\n", app.ID)
+
+		deps, err := apiClient.ListDeployments(name)
+		if err != nil {
+			return err
+		}
+		if len(deps) == 0 {
+			return nil
+		}
+		fmt.Printf("\nrecent deployments\n")
+		fmt.Printf("%-38s  %-11s  %-6s  %s\n", "ID", "STATUS", "PORT", "DURATION")
+		for _, d := range deps {
+			port := "-"
+			if d.Port > 0 {
+				port = fmt.Sprintf("%d", d.Port)
+			}
+			dur := "-"
+			if d.DurationMs > 0 {
+				dur = fmt.Sprintf("%dms", d.DurationMs)
+			}
+			fmt.Printf("%-38s  %-11s  %-6s  %s\n", d.ID, d.Status, port, dur)
+		}
+		return nil
+	},
+}
+
 func init() {
-	appsCmd.AddCommand(appsCreateCmd, appsListCmd)
+	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd)
 }

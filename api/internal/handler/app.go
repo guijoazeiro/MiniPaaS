@@ -18,7 +18,7 @@ type AppService interface {
 }
 
 type AppStopper interface {
-	StopApp(ctx context.Context, id uuid.UUID) error
+	StopApp(ctx context.Context, app domain.App) error
 }
 
 type AppHandler struct {
@@ -76,7 +76,7 @@ func (h *AppHandler) Delete(c *gin.Context) {
 		respondError(c, h.log, err)
 		return
 	}
-	if err := h.stopper.StopApp(c.Request.Context(), app.ID); err != nil {
+	if err := h.stopper.StopApp(c.Request.Context(), app); err != nil {
 		h.log.Warn("stop app", "app", app.Name, "err", err)
 	}
 	if err := h.svc.Delete(c.Request.Context(), app.ID); err != nil {

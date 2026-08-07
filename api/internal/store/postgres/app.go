@@ -11,6 +11,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AppStore struct {
@@ -77,6 +78,17 @@ func (s *AppStore) UpdateStatus(ctx context.Context, id uuid.UUID, status domain
 	return nil
 }
 
+func (s *AppStore) UpdatePublicURL(ctx context.Context, id uuid.UUID, url string) error {
+	err := s.q.UpdateAppPublicURL(ctx, sqlc.UpdateAppPublicURLParams{
+		ID:        uuidToPG(id),
+		PublicUrl: pgtype.Text{String: url, Valid: url != ""},
+	})
+	if err != nil {
+		return fmt.Errorf("store.UpdateAppPublicURL: %w", err)
+	}
+	return nil
+}
+
 func (s *AppStore) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.q.DeleteApp(ctx, uuidToPG(id)); err != nil {
 		return fmt.Errorf("store.DeleteApp: %w", err)
@@ -89,6 +101,7 @@ func toDomainApp(row sqlc.App) domain.App {
 		ID:        pgToUUID(row.ID),
 		Name:      row.Name,
 		Status:    domain.AppStatus(row.Status),
+		PublicURL: pgText(row.PublicUrl),
 		CreatedAt: row.CreatedAt.Time,
 		UpdatedAt: row.UpdatedAt.Time,
 	}

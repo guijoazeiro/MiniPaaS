@@ -20,15 +20,21 @@ type DockerRunner interface {
 	RemoveContainer(ctx context.Context, id string) error
 }
 
+type CaddyRouter interface {
+	UpsertRoute(ctx context.Context, appName string, port int) (publicURL string, err error)
+	RemoveRoute(ctx context.Context, appName string) error
+}
+
 type DeploymentService struct {
 	deps   store.DeploymentStore
 	apps   store.AppStore
 	docker DockerRunner
+	caddy  CaddyRouter
 	log    *slog.Logger
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, dk DockerRunner, log *slog.Logger) *DeploymentService {
-	return &DeploymentService{deps: deps, apps: apps, docker: dk, log: log}
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, dk DockerRunner, cd CaddyRouter, log *slog.Logger) *DeploymentService {
+	return &DeploymentService{deps: deps, apps: apps, docker: dk, caddy: cd, log: log}
 }
 
 func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.Deployment, domain.App, error) {
@@ -102,6 +108,13 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		s.log.Warn("update app status", "app", app.Name, "err", err)
 	}
 
+	publicURL, err := s.caddy.UpsertRoute(ctx, app.Name, info.Port)
+	if err != nil {
+		s.log.Error("caddy route", "app", app.Name, "err", err)
+	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
+		s.log.Warn("update public url", "app", app.Name, "err", err)
+	}
+
 	s.log.Info("deploy ok",
 		"app", app.Name,
 		"deployment", dep.ID,
@@ -112,8 +125,11 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 	return nil
 }
 
-func (s *DeploymentService) StopApp(ctx context.Context, appID uuid.UUID) error {
-	dep, err := s.deps.GetActive(ctx, appID)
+func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
+	if err := s.caddy.RemoveRoute(ctx, app.Name); err != nil {
+		s.log.Warn("caddy remove route", "app", app.Name, "err", err)
+	}
+	dep, err := s.deps.GetActive(ctx, app.ID)
 	if err != nil {
 		return nil
 	}

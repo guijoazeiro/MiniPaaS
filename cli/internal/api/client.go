@@ -23,17 +23,28 @@ func New(base string) *Client {
 }
 
 type App struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	PublicURL string `json:"public_url,omitempty"`
 }
 
 type Deployment struct {
-	ID       string `json:"id"`
-	AppID    string `json:"app_id"`
-	ImageTag string `json:"image_tag"`
-	Status   string `json:"status"`
-	Port     int    `json:"port,omitempty"`
+	ID         string `json:"id"`
+	AppID      string `json:"app_id"`
+	ImageTag   string `json:"image_tag"`
+	Status     string `json:"status"`
+	Port       int    `json:"port,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
+	DurationMs int    `json:"duration_ms,omitempty"`
+}
+
+func (c *Client) ListDeployments(app string) ([]Deployment, error) {
+	var out []Deployment
+	if err := c.doJSON(http.MethodGet, "/apps/"+app+"/deployments?limit=5", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) CreateApp(name string) (*App, error) {

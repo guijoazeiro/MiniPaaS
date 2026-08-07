@@ -14,7 +14,7 @@ import (
 const createApp = `-- name: CreateApp :one
 INSERT INTO apps (name)
 VALUES ($1)
-RETURNING id, name, status, created_at, updated_at
+RETURNING id, name, status, created_at, updated_at, public_url
 `
 
 func (q *Queries) CreateApp(ctx context.Context, name string) (App, error) {
@@ -26,6 +26,7 @@ func (q *Queries) CreateApp(ctx context.Context, name string) (App, error) {
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicUrl,
 	)
 	return i, err
 }
@@ -40,7 +41,7 @@ func (q *Queries) DeleteApp(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getAppByID = `-- name: GetAppByID :one
-SELECT id, name, status, created_at, updated_at FROM apps
+SELECT id, name, status, created_at, updated_at, public_url FROM apps
 WHERE id = $1
 LIMIT 1
 `
@@ -54,12 +55,13 @@ func (q *Queries) GetAppByID(ctx context.Context, id pgtype.UUID) (App, error) {
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicUrl,
 	)
 	return i, err
 }
 
 const getAppByName = `-- name: GetAppByName :one
-SELECT id, name, status, created_at, updated_at FROM apps
+SELECT id, name, status, created_at, updated_at, public_url FROM apps
 WHERE name = $1
 LIMIT 1
 `
@@ -73,12 +75,13 @@ func (q *Queries) GetAppByName(ctx context.Context, name string) (App, error) {
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicUrl,
 	)
 	return i, err
 }
 
 const listApps = `-- name: ListApps :many
-SELECT id, name, status, created_at, updated_at FROM apps
+SELECT id, name, status, created_at, updated_at, public_url FROM apps
 ORDER BY created_at DESC
 `
 
@@ -97,6 +100,7 @@ func (q *Queries) ListApps(ctx context.Context) ([]App, error) {
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublicUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -106,6 +110,22 @@ func (q *Queries) ListApps(ctx context.Context) ([]App, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAppPublicURL = `-- name: UpdateAppPublicURL :exec
+UPDATE apps
+SET public_url = $1, updated_at = now()
+WHERE id = $2
+`
+
+type UpdateAppPublicURLParams struct {
+	PublicUrl pgtype.Text `json:"public_url"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateAppPublicURL(ctx context.Context, arg UpdateAppPublicURLParams) error {
+	_, err := q.db.Exec(ctx, updateAppPublicURL, arg.PublicUrl, arg.ID)
+	return err
 }
 
 const updateAppStatus = `-- name: UpdateAppStatus :exec
