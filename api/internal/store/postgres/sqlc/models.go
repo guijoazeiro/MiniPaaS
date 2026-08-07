@@ -14,6 +14,7 @@ type App struct {
 	Status    string             `json:"status"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	PublicUrl pgtype.Text        `json:"public_url"`
 }
 
 type Deployment struct {

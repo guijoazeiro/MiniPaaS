@@ -13,6 +13,7 @@ type AppStore interface {
 	GetByID(ctx context.Context, id uuid.UUID) (domain.App, error)
 	List(ctx context.Context) ([]domain.App, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.AppStatus) error
+	UpdatePublicURL(ctx context.Context, id uuid.UUID, url string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

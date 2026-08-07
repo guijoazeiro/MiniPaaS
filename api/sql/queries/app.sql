@@ -22,5 +22,10 @@ UPDATE apps
 SET status = @status, updated_at = now()
 WHERE id = @id;
 
+-- name: UpdateAppPublicURL :exec
+UPDATE apps
+SET public_url = @public_url, updated_at = now()
+WHERE id = @id;
+
 -- name: DeleteApp :exec
 DELETE FROM apps WHERE id = @id;
