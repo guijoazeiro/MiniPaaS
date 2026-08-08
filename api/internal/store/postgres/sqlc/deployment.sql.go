@@ -130,6 +130,49 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 	return items, nil
 }
 
+const listDeploymentsForRetention = `-- name: ListDeploymentsForRetention :many
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments
+WHERE app_id = $1
+ORDER BY created_at DESC
+OFFSET $2
+`
+
+type ListDeploymentsForRetentionParams struct {
+	AppID pgtype.UUID `json:"app_id"`
+	Keep  int32       `json:"keep"`
+}
+
+func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeploymentsForRetentionParams) ([]Deployment, error) {
+	rows, err := q.db.Query(ctx, listDeploymentsForRetention, arg.AppID, arg.Keep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Deployment
+	for rows.Next() {
+		var i Deployment
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ImageTag,
+			&i.Status,
+			&i.ContainerID,
+			&i.Port,
+			&i.CommitSha,
+			&i.DurationMs,
+			&i.CreatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningDeployments = `-- name: ListRunningDeployments :many
 SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments WHERE status = 'running'
 `

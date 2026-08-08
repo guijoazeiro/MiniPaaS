@@ -11,16 +11,20 @@ import (
 )
 
 type Client struct {
-	base string
-	http *http.Client
+	base  string
+	token string
+	http  *http.Client
 }
 
-func New(base string) *Client {
+func New(base, token string) *Client {
 	return &Client{
-		base: base,
-		http: &http.Client{Timeout: 5 * time.Minute},
+		base:  base,
+		token: token,
+		http:  &http.Client{Timeout: 5 * time.Minute},
 	}
 }
+
+func (c *Client) Host() string { return c.base }
 
 type App struct {
 	ID        string `json:"id"`
@@ -95,6 +99,7 @@ func (c *Client) Deploy(app string, tar io.Reader) (*Deployment, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
+	c.authHeader(req)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -127,6 +132,7 @@ func (c *Client) doJSON(method, path string, body io.Reader, contentType string,
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
+	c.authHeader(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -144,4 +150,55 @@ func (c *Client) doJSON(method, path string, body io.Reader, contentType string,
 func httpErr(resp *http.Response) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 	return fmt.Errorf("http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
+}
+
+func (c *Client) authHeader(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+}
+
+type LoginResp struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (c *Client) Login(username, password string) (*LoginResp, error) {
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	var out LoginResp
+	if err := c.doJSON(http.MethodPost, "/auth/login", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type EnvKey struct {
+	Key       string `json:"key"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func (c *Client) ListEnv(app string) ([]EnvKey, error) {
+	var out []EnvKey
+	if err := c.doJSON(http.MethodGet, "/apps/"+app+"/env", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) SetEnv(app, key, value string) error {
+	body, _ := json.Marshal(map[string]string{"value": value})
+	return c.doJSON(http.MethodPut, "/apps/"+app+"/env/"+key, bytes.NewReader(body), "application/json", nil)
+}
+
+func (c *Client) UnsetEnv(app, key string) error {
+	return c.doJSON(http.MethodDelete, "/apps/"+app+"/env/"+key, nil, "", nil)
+}
+
+func (c *Client) Rollback(app, deploymentID string) (*Deployment, error) {
+	body, _ := json.Marshal(map[string]string{"deployment_id": deploymentID})
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/rollback", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

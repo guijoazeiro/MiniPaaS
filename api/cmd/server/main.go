@@ -14,11 +14,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/caddy"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/crypto"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/handler/middleware"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/service"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
+	wspkg "github.com/guijoazeiro/MiniPaaS/api/internal/ws"
 	"github.com/joho/godotenv"
 )
 
@@ -57,15 +60,34 @@ func main() {
 		log.Warn("caddy.EnsureBase (proxy may be down; deploys will still record but skip routes)", "err", err)
 	}
 
+	cipher, err := crypto.New(cfg.EncryptionKey)
+	if err != nil {
+		log.Error("crypto.New", "err", err)
+		os.Exit(1)
+	}
+
 	q := sqlc.New(pool)
 	appStore := postgres.NewAppStore(q)
 	depStore := postgres.NewDeploymentStore(q)
+	userStore := postgres.NewUserStore(q)
+	envStore := postgres.NewEnvStore(q)
+	rollbackStore := postgres.NewRollbackStore(q)
 
+	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
+	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, caddyCli, log)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, log)
 
+	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+		log.Error("seed admin", "err", err)
+		os.Exit(1)
+	}
+
+	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
+	envH := handler.NewEnvHandler(envSvc, appStore, log)
+	wsH := wspkg.New(appStore, dockerCli, depStore.GetActive, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -80,15 +102,25 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	r.POST("/auth/login", authH.Login)
 
-	r.POST("/apps", appH.Create)
-	r.GET("/apps", appH.List)
-	r.GET("/apps/:name", appH.Get)
-	r.DELETE("/apps/:name", appH.Delete)
+	auth := r.Group("/", middleware.Auth(authSvc))
 
-	r.POST("/apps/:name/deployments", depH.Create)
-	r.GET("/apps/:name/deployments", depH.List)
-	r.GET("/apps/:name/deployments/:id", depH.Get)
+	auth.POST("/apps", appH.Create)
+	auth.GET("/apps", appH.List)
+	auth.GET("/apps/:name", appH.Get)
+	auth.DELETE("/apps/:name", appH.Delete)
+
+	auth.POST("/apps/:name/deployments", depH.Create)
+	auth.GET("/apps/:name/deployments", depH.List)
+	auth.GET("/apps/:name/deployments/:id", depH.Get)
+	auth.POST("/apps/:name/rollback", depH.Rollback)
+
+	auth.GET("/apps/:name/env", envH.List)
+	auth.PUT("/apps/:name/env/:key", envH.Set)
+	auth.DELETE("/apps/:name/env/:key", envH.Delete)
+
+	auth.GET("/apps/:name/logs", wsH.Serve)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,

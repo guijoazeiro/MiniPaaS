@@ -34,6 +34,18 @@ const (
 	DeploymentStatusRolledBack DeploymentStatus = "rolled_back"
 )
 
+type User struct {
+	ID           uuid.UUID `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type EnvVarKey struct {
+	Key       string    `json:"key"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Deployment struct {
 	ID          uuid.UUID        `json:"id"`
 	AppID       uuid.UUID        `json:"app_id"`

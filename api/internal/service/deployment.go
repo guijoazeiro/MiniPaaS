@@ -18,6 +18,7 @@ type DockerRunner interface {
 	RunContainer(ctx context.Context, opts docker.RunOptions) (docker.ContainerInfo, error)
 	StopContainer(ctx context.Context, id string) error
 	RemoveContainer(ctx context.Context, id string) error
+	RemoveImage(ctx context.Context, ref string) error
 }
 
 type CaddyRouter interface {
@@ -25,16 +26,30 @@ type CaddyRouter interface {
 	RemoveRoute(ctx context.Context, appName string) error
 }
 
-type DeploymentService struct {
-	deps   store.DeploymentStore
-	apps   store.AppStore
-	docker DockerRunner
-	caddy  CaddyRouter
-	log    *slog.Logger
+type EnvDecryptor interface {
+	Decrypted(ctx context.Context, appID uuid.UUID) (map[string]string, error)
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, dk DockerRunner, cd CaddyRouter, log *slog.Logger) *DeploymentService {
-	return &DeploymentService{deps: deps, apps: apps, docker: dk, caddy: cd, log: log}
+type DeploymentService struct {
+	deps           store.DeploymentStore
+	apps           store.AppStore
+	rollbacks      store.RollbackStore
+	docker         DockerRunner
+	caddy          CaddyRouter
+	env            EnvDecryptor
+	imageRetention int
+	log            *slog.Logger
+}
+
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, log *slog.Logger) *DeploymentService {
+	if retention < 1 {
+		retention = 5
+	}
+	return &DeploymentService{
+		deps: deps, apps: apps, rollbacks: rb,
+		docker: dk, caddy: cd, env: env,
+		imageRetention: retention, log: log,
+	}
 }
 
 func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.Deployment, domain.App, error) {
@@ -90,9 +105,16 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
 	}
 
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
+	}
+
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image: dep.ImageTag,
 		Name:  fmt.Sprintf("minipaas-%s", app.Name),
+		Env:   envVars,
 	})
 	if err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)
@@ -122,7 +144,106 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 		"port", info.Port,
 		"dur_ms", time.Since(start).Milliseconds(),
 	)
+
+	s.pruneImages(ctx, app.ID)
 	return nil
+}
+
+func (s *DeploymentService) Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error) {
+	start := time.Now()
+
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	target, err := s.deps.GetByID(ctx, targetID)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	if target.AppID != app.ID {
+		return domain.Deployment{}, domain.ErrDeploymentNotFound
+	}
+	if target.ImageTag == "" {
+		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
+	}
+
+	var fromID uuid.UUID
+	if current, err := s.deps.GetActive(ctx, app.ID); err == nil {
+		fromID = current.ID
+		if current.ContainerID != "" {
+			if err := s.docker.StopContainer(ctx, current.ContainerID); err != nil {
+				s.log.Warn("rollback: stop current", "container", current.ContainerID, "err", err)
+			}
+			if err := s.docker.RemoveContainer(ctx, current.ContainerID); err != nil {
+				s.log.Warn("rollback: remove current", "container", current.ContainerID, "err", err)
+			}
+		}
+		if err := s.deps.UpdateStatus(ctx, current.ID, domain.DeploymentStatusRolledBack); err != nil {
+			s.log.Warn("rollback: mark current rolled_back", "err", err)
+		}
+	}
+
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: decrypt env: %w", err)
+	}
+
+	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
+		Image: target.ImageTag,
+		Name:  fmt.Sprintf("minipaas-%s", app.Name),
+		Env:   envVars,
+	})
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: run container: %w", err)
+	}
+
+	durationMs := int(time.Since(start).Milliseconds())
+	if err := s.deps.UpdateRunning(ctx, target.ID, info.ID, info.Port, target.ImageTag, durationMs); err != nil {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: mark target running: %w", err)
+	}
+	if err := s.apps.UpdateStatus(ctx, app.ID, domain.AppStatusRunning); err != nil {
+		s.log.Warn("rollback: update app status", "err", err)
+	}
+
+	publicURL, err := s.caddy.UpsertRoute(ctx, app.Name, info.Port)
+	if err != nil {
+		s.log.Error("rollback: caddy route", "err", err)
+	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
+		s.log.Warn("rollback: update public url", "err", err)
+	}
+
+	if err := s.rollbacks.Record(ctx, app.ID, fromID, target.ID, triggeredBy); err != nil {
+		s.log.Warn("rollback: history", "err", err)
+	}
+
+	restored, err := s.deps.GetByID(ctx, target.ID)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	s.log.Info("rollback ok",
+		"app", app.Name, "from", fromID, "to", target.ID,
+		"container", info.ID, "port", info.Port,
+		"dur_ms", time.Since(start).Milliseconds(),
+	)
+	return restored, nil
+}
+
+func (s *DeploymentService) pruneImages(ctx context.Context, appID uuid.UUID) {
+	old, err := s.deps.ListForRetention(ctx, appID, s.imageRetention)
+	if err != nil {
+		s.log.Warn("prune: list", "err", err)
+		return
+	}
+	seen := map[string]bool{}
+	for _, d := range old {
+		if d.ImageTag == "" || seen[d.ImageTag] {
+			continue
+		}
+		seen[d.ImageTag] = true
+		if err := s.docker.RemoveImage(ctx, d.ImageTag); err != nil {
+			s.log.Debug("prune: skip", "image", d.ImageTag, "err", err)
+		}
+	}
 }
 
 func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {

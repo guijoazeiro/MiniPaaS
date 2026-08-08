@@ -6,17 +6,23 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
+	"time"
 )
 
 type Config struct {
-	Port          string
-	DatabaseURL   string
-	DockerHost    string
-	CaddyAdminURL string
-	BaseDomain    string
-	EncryptionKey []byte
-	JWTSecret     string
-	LogLevel      string
+	Port           string
+	DatabaseURL    string
+	DockerHost     string
+	CaddyAdminURL  string
+	BaseDomain     string
+	EncryptionKey  []byte
+	JWTSecret      string
+	TokenTTL       time.Duration
+	AdminUsername  string
+	AdminPassword  string
+	ImageRetention int
+	LogLevel       string
 }
 
 func Load() (*Config, error) {
@@ -30,6 +36,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: CADDY_ADMIN_URL: %w", err)
 	}
 
+	ttl, err := time.ParseDuration(env("TOKEN_TTL", "24h"))
+	if err != nil {
+		return nil, fmt.Errorf("config: TOKEN_TTL: %w", err)
+	}
+
+	retention, err := strconv.Atoi(env("IMAGE_RETENTION", "5"))
+	if err != nil || retention < 1 {
+		return nil, fmt.Errorf("config: IMAGE_RETENTION must be a positive integer")
+	}
+
 	return &Config{
 		Port:          env("PORT", ":8080"),
 		DatabaseURL:   mustEnv("DATABASE_URL"),
@@ -38,7 +54,11 @@ func Load() (*Config, error) {
 		BaseDomain:    mustEnv("BASE_DOMAIN"),
 		EncryptionKey: encKey,
 		JWTSecret:     mustEnv("JWT_SECRET"),
-		LogLevel:      env("LOG_LEVEL", "info"),
+		TokenTTL:       ttl,
+		AdminUsername:  os.Getenv("ADMIN_USERNAME"),
+		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
+		ImageRetention: retention,
+		LogLevel:       env("LOG_LEVEL", "info"),
 	}, nil
 
 }

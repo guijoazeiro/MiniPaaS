@@ -68,6 +68,21 @@ func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit 
 	return out, nil
 }
 
+func (s *DeploymentStore) ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error) {
+	rows, err := s.q.ListDeploymentsForRetention(ctx, sqlc.ListDeploymentsForRetentionParams{
+		AppID: uuidToPG(appID),
+		Keep:  int32(keep),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListDeploymentsForRetention: %w", err)
+	}
+	out := make([]domain.Deployment, len(rows))
+	for i, r := range rows {
+		out[i] = toDomainDeployment(r)
+	}
+	return out, nil
+}
+
 func (s *DeploymentStore) UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error {
 	err := s.q.UpdateDeploymentRunning(ctx, sqlc.UpdateDeploymentRunningParams{
 		ID:          uuidToPG(id),

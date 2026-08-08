@@ -35,3 +35,9 @@ WHERE id = @id;
 
 -- name: ListRunningDeployments :many
 SELECT * FROM deployments WHERE status = 'running';
+
+-- name: ListDeploymentsForRetention :many
+SELECT * FROM deployments
+WHERE app_id = @app_id
+ORDER BY created_at DESC
+OFFSET @keep;
