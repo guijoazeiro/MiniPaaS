@@ -6,7 +6,7 @@ let i = 0;
 setInterval(() => {
   i += 1;
   console.log(`heartbeat ${i}`);
-  if (i % 3 === 0) console.error(`even beat ${i}`);
+  if (i % 3 === 0) console.error(`event ${i}`);
 }, 1000);
 
 http

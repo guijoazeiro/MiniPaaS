@@ -71,11 +71,12 @@ func main() {
 	depStore := postgres.NewDeploymentStore(q)
 	userStore := postgres.NewUserStore(q)
 	envStore := postgres.NewEnvStore(q)
+	rollbackStore := postgres.NewRollbackStore(q)
 
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, dockerCli, caddyCli, envSvc, log)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, log)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Error("seed admin", "err", err)
@@ -113,6 +114,7 @@ func main() {
 	auth.POST("/apps/:name/deployments", depH.Create)
 	auth.GET("/apps/:name/deployments", depH.List)
 	auth.GET("/apps/:name/deployments/:id", depH.Get)
+	auth.POST("/apps/:name/rollback", depH.Rollback)
 
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)

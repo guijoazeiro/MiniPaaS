@@ -43,7 +43,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&hostFlag, "host", "", "MiniPaaS API URL (overrides saved config and MINIPAAS_HOST)")
-	rootCmd.AddCommand(appsCmd, deployCmd, loginCmd, envCmd, logsCmd)
+	rootCmd.AddCommand(appsCmd, deployCmd, loginCmd, envCmd, logsCmd, rollbackCmd)
 }
 
 func Execute() error {

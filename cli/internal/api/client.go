@@ -193,3 +193,12 @@ func (c *Client) SetEnv(app, key, value string) error {
 func (c *Client) UnsetEnv(app, key string) error {
 	return c.doJSON(http.MethodDelete, "/apps/"+app+"/env/"+key, nil, "", nil)
 }
+
+func (c *Client) Rollback(app, deploymentID string) (*Deployment, error) {
+	body, _ := json.Marshal(map[string]string{"deployment_id": deploymentID})
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/rollback", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

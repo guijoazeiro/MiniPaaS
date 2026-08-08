@@ -19,6 +19,7 @@ type DeploymentService interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
 	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
 	RunBuild(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader) error
+	Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error)
 }
 
 type AppLookup interface {
@@ -102,6 +103,29 @@ func (h *DeploymentHandler) List(c *gin.Context) {
 		deps = []domain.Deployment{}
 	}
 	c.JSON(http.StatusOK, deps)
+}
+
+type rollbackReq struct {
+	DeploymentID string `json:"deployment_id" binding:"required"`
+}
+
+func (h *DeploymentHandler) Rollback(c *gin.Context) {
+	var req rollbackReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	id, err := uuid.Parse(req.DeploymentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment_id"})
+		return
+	}
+	restored, err := h.svc.Rollback(c.Request.Context(), c.Param("name"), id, "cli")
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, restored)
 }
 
 func (h *DeploymentHandler) Get(c *gin.Context) {

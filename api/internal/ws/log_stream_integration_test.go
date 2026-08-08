@@ -19,7 +19,6 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 )
 
-// fakeAppLookup returns a fixed app for any name.
 type fakeAppLookup struct{ app domain.App }
 
 func (f fakeAppLookup) GetByName(_ context.Context, name string) (domain.App, error) {
@@ -29,7 +28,6 @@ func (f fakeAppLookup) GetByName(_ context.Context, name string) (domain.App, er
 	return f.app, nil
 }
 
-// fakeDockerLogs returns a stream that emits the pre-baked bytes and closes.
 type fakeDockerLogs struct{ payload []byte }
 
 func (f fakeDockerLogs) StreamLogs(_ context.Context, _ string, _ docker.LogOptions) (io.ReadCloser, error) {
@@ -41,8 +39,6 @@ func (f fakeDockerLogs) StreamLogs(_ context.Context, _ string, _ docker.LogOpti
 	return pr, nil
 }
 
-// makeDockerStream builds a byte slice in Docker's multiplexed log format
-// with the given stdout / stderr lines interleaved.
 func makeDockerStream(t *testing.T, entries []struct{ stream, line string }) []byte {
 	t.Helper()
 	buf := &strings.Builder{}
@@ -60,8 +56,6 @@ func makeDockerStream(t *testing.T, entries []struct{ stream, line string }) []b
 	return []byte(buf.String())
 }
 
-// stringWriter adapts strings.Builder to io.Writer (Builder already implements it,
-// but keeping an explicit wrapper avoids import gymnastics).
 type stringWriter struct{ b *strings.Builder }
 
 func (s stringWriter) Write(p []byte) (int, error) { return s.b.Write(p) }
