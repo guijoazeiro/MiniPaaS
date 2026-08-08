@@ -13,8 +13,8 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 2 | Dynamic reverse proxy (Caddy) + HTTPS | ✅ done |
 | 3 | Auth (JWT) + encrypted env vars (AES-256-GCM) | ✅ done |
 | 4 | WebSocket log streaming | ✅ done |
-| 5 | Rollback | ⏳ next |
-| 6 | Health checks | — |
+| 5 | Rollback + image retention | ✅ done |
+| 6 | Health checks | ⏳ next |
 | 7 | Dashboard (Next.js) | — |
 | 8 | Polish, CI, release | — |
 
@@ -199,9 +199,28 @@ The `GET /foo` line appears live, interleaved with the heartbeat. Split streams 
 ./minip.exe apps info hello
 ```
 
-Shows status, public URL (`https://hello.<BASE_DOMAIN>` — served by Caddy), and the last few deployments with their statuses (`running`, `superseded`, `failed`).
+Shows status, public URL (`https://hello.<BASE_DOMAIN>` — served by Caddy), and the last few deployments with their statuses (`running`, `superseded`, `failed`, `rolled_back`).
 
-### 12. Clean up
+### 12. Roll back to a previous deployment
+
+Make a visible change to `hello-world/server.js` (e.g. change the heartbeat message), redeploy, then roll back:
+
+```bash
+./minip.exe deploy ../hello-world --app hello --wait     # creates v2, v1 becomes superseded
+./minip.exe rollback hello                               # interactive picker; select v1
+./minip.exe logs hello -f                                # container now runs the old code
+./minip.exe apps info hello                              # v1 back to running, v2 → rolled_back
+```
+
+Non-interactive form:
+
+```bash
+./minip.exe rollback hello --to <deployment-id>
+```
+
+Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild.
+
+### 13. Clean up
 
 ```bash
 ./minip.exe apps list                   # confirm
@@ -232,6 +251,8 @@ GET    /apps/:name/env                → []{ key, updated_at }        (values n
 PUT    /apps/:name/env/:key           { value } → 204                (AES-256-GCM at rest)
 DELETE /apps/:name/env/:key           → 204
 
+POST   /apps/:name/rollback           { deployment_id } → Deployment (restored)
+
 WS     /apps/:name/logs?follow=true&tail=100
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
 ```
@@ -260,6 +281,8 @@ minip env unset <app> KEY
 minip logs <app>                       # last 100 lines
 minip logs <app> -f                    # follow until Ctrl+C
 minip logs <app> --tail all -f         # backfill everything, then follow
+minip rollback <app>                   # interactive picker of eligible deployments
+minip rollback <app> --to <id>         # skip the picker
 ```
 
 Host resolution order: `--host` flag → `MINIPAAS_HOST` env → saved config → `http://localhost:8080`.
@@ -288,7 +311,7 @@ minipaas/
 │   │   └── queries/                   # sqlc source queries
 │   └── sqlc.yaml
 ├── cli/                               # separate Go module — Cobra CLI
-│   ├── cmd/                           # root, login, apps, env, deploy, logs
+│   ├── cmd/                           # root, login, apps, env, deploy, logs, rollback
 │   ├── internal/
 │   │   ├── api/                       # HTTP client (adds Authorization: Bearer)
 │   │   ├── config/                    # ~/.config/minip/config.json (0600)
@@ -317,6 +340,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `TOKEN_TTL` | no | `24h` | JWT lifetime — any `time.ParseDuration` value |
 | `ADMIN_USERNAME` | no | — | First-run admin seed. Ignored once a user exists |
 | `ADMIN_PASSWORD` | no | — | First-run admin seed. Ignored once a user exists |
+| `IMAGE_RETENTION` | no | `5` | How many recent deployment images to keep per app. Older ones are pruned (best-effort) after each successful deploy — Docker refuses to delete in-use images, so the active one is always safe. |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
 
 ## Development
