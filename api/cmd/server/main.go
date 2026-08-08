@@ -21,6 +21,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/service"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
+	wspkg "github.com/guijoazeiro/MiniPaaS/api/internal/ws"
 	"github.com/joho/godotenv"
 )
 
@@ -85,6 +86,7 @@ func main() {
 	appH := handler.NewAppHandler(appSvc, depSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
+	wsH := wspkg.New(appStore, dockerCli, depStore.GetActive, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -115,6 +117,8 @@ func main() {
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)
 	auth.DELETE("/apps/:name/env/:key", envH.Delete)
+
+	auth.GET("/apps/:name/logs", wsH.Serve)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,

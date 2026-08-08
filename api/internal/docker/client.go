@@ -117,9 +117,20 @@ func (c *Client) RemoveContainer(ctx context.Context, id string) error {
 	return nil
 }
 
-func (c *Client) StreamLogs(ctx context.Context, id string) (io.ReadCloser, error) {
+type LogOptions struct {
+	Follow bool
+	Tail   string
+}
+
+func (c *Client) StreamLogs(ctx context.Context, id string, opts LogOptions) (io.ReadCloser, error) {
+	tail := opts.Tail
+	if tail == "" {
+		tail = "100"
+	}
 	rc, err := c.cli.ContainerLogs(ctx, id, container.LogsOptions{
-		ShowStdout: true, ShowStderr: true, Follow: true, Timestamps: true,
+		ShowStdout: true, ShowStderr: true,
+		Follow: opts.Follow,
+		Tail:   tail,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("docker.StreamLogs: %w", err)
