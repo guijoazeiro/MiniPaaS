@@ -18,6 +18,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler/middleware"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/health"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/service"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
@@ -76,7 +77,8 @@ func main() {
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, log)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log)
+	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Error("seed admin", "err", err)
@@ -84,10 +86,10 @@ func main() {
 	}
 
 	authH := handler.NewAuthHandler(authSvc, log)
-	appH := handler.NewAppHandler(appSvc, depSvc, log)
+	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
-	wsH := wspkg.New(appStore, dockerCli, depStore.GetActive, log)
+	wsH := wspkg.New(appStore, dockerCli, depStore, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -136,10 +138,15 @@ func main() {
 		}
 	}()
 
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
+	healthChecker.Start(healthCtx)
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	log.Info("shutting down")
+	cancelHealth()
+	healthChecker.Stop()
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShutdown()

@@ -15,12 +15,13 @@ const (
 )
 
 type App struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Status    AppStatus `json:"status"`
-	PublicURL string    `json:"public_url,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Status         AppStatus `json:"status"`
+	ContainerState string    `json:"container_state,omitempty"`
+	PublicURL      string    `json:"public_url,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type DeploymentStatus string

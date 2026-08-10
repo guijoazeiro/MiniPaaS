@@ -47,13 +47,15 @@ var logsCmd = &cobra.Command{
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+		done := make(chan struct{})
 		go func() {
 			<-sigCh
 			_ = conn.WriteControl(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 				time.Now().Add(2*time.Second))
+			close(done)
 			_ = conn.Close()
-			os.Exit(0)
 		}()
 
 		type frame struct {
@@ -64,6 +66,11 @@ var logsCmd = &cobra.Command{
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
+				select {
+				case <-done:
+					return nil
+				default:
+				}
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
 					return nil
 				}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,24 +32,26 @@ type EnvDecryptor interface {
 }
 
 type DeploymentService struct {
-	deps           store.DeploymentStore
-	apps           store.AppStore
-	rollbacks      store.RollbackStore
-	docker         DockerRunner
-	caddy          CaddyRouter
-	env            EnvDecryptor
-	imageRetention int
-	log            *slog.Logger
+	deps              store.DeploymentStore
+	apps              store.AppStore
+	rollbacks         store.RollbackStore
+	docker            DockerRunner
+	caddy             CaddyRouter
+	env               EnvDecryptor
+	imageRetention    int
+	restartPolicy     string
+	restartMaxRetries int
+	log               *slog.Logger
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, log *slog.Logger) *DeploymentService {
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger) *DeploymentService {
 	if retention < 1 {
 		retention = 5
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
-		imageRetention: retention, log: log,
+		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log,
 	}
 }
 
@@ -112,9 +115,11 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 	}
 
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
-		Image: dep.ImageTag,
-		Name:  fmt.Sprintf("minipaas-%s", app.Name),
-		Env:   envVars,
+		Image:             dep.ImageTag,
+		Name:              fmt.Sprintf("minipaas-%s", app.Name),
+		Env:               envVars,
+		RestartPolicy:     s.restartPolicy,
+		RestartMaxRetries: s.restartMaxRetries,
 	})
 	if err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)
@@ -166,9 +171,12 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if target.ImageTag == "" {
 		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
 	}
-
 	var fromID uuid.UUID
-	if current, err := s.deps.GetActive(ctx, app.ID); err == nil {
+	current, err := s.deps.GetActive(ctx, app.ID)
+	if err == nil {
+		if current.ID == target.ID {
+			return domain.Deployment{}, domain.ErrDeploymentActive
+		}
 		fromID = current.ID
 		if current.ContainerID != "" {
 			if err := s.docker.StopContainer(ctx, current.ContainerID); err != nil {
@@ -181,6 +189,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 		if err := s.deps.UpdateStatus(ctx, current.ID, domain.DeploymentStatusRolledBack); err != nil {
 			s.log.Warn("rollback: mark current rolled_back", "err", err)
 		}
+	} else if !errors.Is(err, domain.ErrDeploymentNotFound) {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: get active deployment: %w", err)
+	}
+	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
+		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
 	}
 
 	envVars, err := s.env.Decrypted(ctx, app.ID)
@@ -189,9 +202,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	}
 
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
-		Image: target.ImageTag,
-		Name:  fmt.Sprintf("minipaas-%s", app.Name),
-		Env:   envVars,
+		Image:             target.ImageTag,
+		Name:              fmt.Sprintf("minipaas-%s", app.Name),
+		Env:               envVars,
+		RestartPolicy:     s.restartPolicy,
+		RestartMaxRetries: s.restartMaxRetries,
 	})
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: run container: %w", err)

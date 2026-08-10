@@ -15,6 +15,8 @@ func respondError(c *gin.Context, log *slog.Logger, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAppNameTaken):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrDeploymentActive), errors.Is(err, domain.ErrDeploymentNotRollbackable):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAppNameInvalid), errors.Is(err, domain.ErrEnvKeyInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrInvalidCredentials), errors.Is(err, domain.ErrUnauthorized):

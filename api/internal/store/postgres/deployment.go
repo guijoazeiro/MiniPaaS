@@ -53,6 +53,18 @@ func (s *DeploymentStore) GetActive(ctx context.Context, appID uuid.UUID) (domai
 	return toDomainDeployment(row), nil
 }
 
+func (s *DeploymentStore) ListRunning(ctx context.Context) ([]domain.Deployment, error) {
+	rows, err := s.q.ListRunningDeployments(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store.ListRunning: %w", err)
+	}
+	out := make([]domain.Deployment, len(rows))
+	for i, row := range rows {
+		out[i] = toDomainDeployment(row)
+	}
+	return out, nil
+}
+
 func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error) {
 	rows, err := s.q.ListDeploymentsByApp(ctx, sqlc.ListDeploymentsByAppParams{
 		AppID: uuidToPG(appID),

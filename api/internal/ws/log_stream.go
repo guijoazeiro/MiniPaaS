@@ -3,7 +3,7 @@ package ws
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +17,12 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
+)
+
+const (
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = 54 * time.Second
 )
 
 type Frame struct {
@@ -33,19 +39,24 @@ type DockerLogs interface {
 	StreamLogs(ctx context.Context, id string, opts docker.LogOptions) (io.ReadCloser, error)
 }
 
+type DeploymentLookup interface {
+	GetActive(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
+	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
+}
+
 type Handler struct {
 	apps     AppLookup
 	docker   DockerLogs
-	getDep   func(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
+	deps     DeploymentLookup
 	upgrader websocket.Upgrader
 	log      *slog.Logger
 }
 
-func New(apps AppLookup, dk DockerLogs, getDep func(ctx context.Context, appID uuid.UUID) (domain.Deployment, error), log *slog.Logger) *Handler {
+func New(apps AppLookup, dk DockerLogs, deps DeploymentLookup, log *slog.Logger) *Handler {
 	return &Handler{
 		apps:   apps,
 		docker: dk,
-		getDep: getDep,
+		deps:   deps,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -60,9 +71,9 @@ func (h *Handler) Serve(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	dep, err := h.getDep(c.Request.Context(), app.ID)
+	dep, err := h.logDeployment(c.Request.Context(), app.ID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no active deployment"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "no deployment with available logs"})
 		return
 	}
 	if dep.ContainerID == "" {
@@ -78,10 +89,23 @@ func (h *Handler) Serve(c *gin.Context) {
 		h.log.Error("ws upgrade", "err", err)
 		return
 	}
-	defer conn.Close()
+	writeMu := &sync.Mutex{}
+	defer func() {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			time.Now().Add(writeWait))
+		_ = conn.Close()
+	}()
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
 
 	go func() {
 		for {
@@ -92,19 +116,41 @@ func (h *Handler) Serve(c *gin.Context) {
 		}
 	}()
 
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait))
+				writeMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
 	rc, err := h.docker.StreamLogs(streamCtx, dep.ContainerID, docker.LogOptions{Follow: follow, Tail: tail})
 	if err != nil {
+		writeMu.Lock()
 		_ = conn.WriteJSON(gin.H{"error": "docker: " + err.Error()})
+		writeMu.Unlock()
 		return
 	}
 	defer rc.Close()
 
-	writeMu := &sync.Mutex{}
 	sendFrame := func(stream, line string) {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		_ = conn.WriteJSON(Frame{TS: time.Now().UTC(), Stream: stream, Line: line})
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		if err := conn.WriteJSON(Frame{TS: time.Now().UTC(), Stream: stream, Line: line}); err != nil {
+			cancel()
+		}
 	}
 
 	out := &lineWriter{stream: "stdout", onLine: sendFrame}
@@ -115,6 +161,27 @@ func (h *Handler) Serve(c *gin.Context) {
 	}
 	out.flush()
 	errW.flush()
+}
+
+func (h *Handler) logDeployment(ctx context.Context, appID uuid.UUID) (domain.Deployment, error) {
+	dep, err := h.deps.GetActive(ctx, appID)
+	if err == nil {
+		return dep, nil
+	}
+	if !errors.Is(err, domain.ErrDeploymentNotFound) {
+		return domain.Deployment{}, err
+	}
+
+	deployments, err := h.deps.ListByApp(ctx, appID, 50)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	for _, candidate := range deployments {
+		if candidate.Status == domain.DeploymentStatusFailed && candidate.ContainerID != "" {
+			return candidate, nil
+		}
+	}
+	return domain.Deployment{}, domain.ErrDeploymentNotFound
 }
 
 type lineWriter struct {
@@ -150,9 +217,11 @@ func isClosedErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "context canceled") ||
-		strings.Contains(msg, "use of closed") ||
-		strings.Contains(msg, "EOF") ||
-		strings.Contains(msg, fmt.Sprint(io.EOF))
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.EOF) ||
+		websocket.IsCloseError(err,
+			websocket.CloseNormalClosure,
+			websocket.CloseGoingAway,
+			websocket.CloseNoStatusReceived,
+		)
 }

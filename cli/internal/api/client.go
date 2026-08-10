@@ -27,10 +27,11 @@ func New(base, token string) *Client {
 func (c *Client) Host() string { return c.base }
 
 type App struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	PublicURL string `json:"public_url,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	ContainerState string `json:"container_state,omitempty"`
+	PublicURL      string `json:"public_url,omitempty"`
 }
 
 type Deployment struct {
@@ -141,7 +142,7 @@ func (c *Client) doJSON(method, path string, body io.Reader, contentType string,
 	if resp.StatusCode >= 300 {
 		return httpErr(resp)
 	}
-	if out == nil || resp.ContentLength == 0 {
+	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
@@ -195,7 +196,7 @@ func (c *Client) UnsetEnv(app, key string) error {
 }
 
 func (c *Client) Rollback(app, deploymentID string) (*Deployment, error) {
-	body, _ := json.Marshal(map[string]string{"deployment_id": deploymentID})
+	body, _ := json.Marshal(map[string]string{"deployment_id": deploymentID, "triggered_by": "cli"})
 	var out Deployment
 	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/rollback", bytes.NewReader(body), "application/json", &out); err != nil {
 		return nil, err
