@@ -107,6 +107,7 @@ func (h *DeploymentHandler) List(c *gin.Context) {
 
 type rollbackReq struct {
 	DeploymentID string `json:"deployment_id" binding:"required"`
+	TriggeredBy  string `json:"triggered_by"`
 }
 
 func (h *DeploymentHandler) Rollback(c *gin.Context) {
@@ -120,7 +121,11 @@ func (h *DeploymentHandler) Rollback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment_id"})
 		return
 	}
-	restored, err := h.svc.Rollback(c.Request.Context(), c.Param("name"), id, "cli")
+	triggeredBy := req.TriggeredBy
+	if triggeredBy != "cli" && triggeredBy != "dashboard" {
+		triggeredBy = "api"
+	}
+	restored, err := h.svc.Rollback(c.Request.Context(), c.Param("name"), id, triggeredBy)
 	if err != nil {
 		respondError(c, h.log, err)
 		return

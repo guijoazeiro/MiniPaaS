@@ -3,7 +3,7 @@ package ws
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +17,12 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
+)
+
+const (
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = 54 * time.Second
 )
 
 type Frame struct {
@@ -83,11 +89,36 @@ func (h *Handler) Serve(c *gin.Context) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
 	go func() {
 		for {
 			if _, _, err := conn.NextReader(); err != nil {
 				cancel()
 				return
+			}
+		}
+	}()
+
+	writeMu := &sync.Mutex{}
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait))
+				writeMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
 			}
 		}
 	}()
@@ -99,12 +130,13 @@ func (h *Handler) Serve(c *gin.Context) {
 	}
 	defer rc.Close()
 
-	writeMu := &sync.Mutex{}
 	sendFrame := func(stream, line string) {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		_ = conn.WriteJSON(Frame{TS: time.Now().UTC(), Stream: stream, Line: line})
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		if err := conn.WriteJSON(Frame{TS: time.Now().UTC(), Stream: stream, Line: line}); err != nil {
+			cancel()
+		}
 	}
 
 	out := &lineWriter{stream: "stdout", onLine: sendFrame}
@@ -150,9 +182,11 @@ func isClosedErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "context canceled") ||
-		strings.Contains(msg, "use of closed") ||
-		strings.Contains(msg, "EOF") ||
-		strings.Contains(msg, fmt.Sprint(io.EOF))
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.EOF) ||
+		websocket.IsCloseError(err,
+			websocket.CloseNormalClosure,
+			websocket.CloseGoingAway,
+			websocket.CloseNoStatusReceived,
+		)
 }

@@ -1,6 +1,9 @@
 package ws
 
 import (
+	"context"
+	"errors"
+	"io"
 	"reflect"
 	"testing"
 )
@@ -18,6 +21,18 @@ func TestLineWriterSplitsAndBuffers(t *testing.T) {
 	w.flush()
 	if want := []string{"hello world", "foo", "bar"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after flush: got %v, want %v", got, want)
+	}
+}
+
+func TestIsClosedErr(t *testing.T) {
+	if !isClosedErr(io.EOF) {
+		t.Fatal("io.EOF should be treated as a closed stream")
+	}
+	if !isClosedErr(context.Canceled) {
+		t.Fatal("context cancellation should be treated as a closed stream")
+	}
+	if isClosedErr(errors.New("EOF in application log")) {
+		t.Fatal("unrelated error text must not be treated as a closed stream")
 	}
 }
 

@@ -26,7 +26,23 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	encKey, err := parseHexKey(mustEnv("ENCRYPTION_KEY"))
+	databaseURL, err := mustEnv("DATABASE_URL")
+	if err != nil {
+		return nil, err
+	}
+	baseDomain, err := mustEnv("BASE_DOMAIN")
+	if err != nil {
+		return nil, err
+	}
+	jwtSecret, err := mustEnv("JWT_SECRET")
+	if err != nil {
+		return nil, err
+	}
+	rawEncryptionKey, err := mustEnv("ENCRYPTION_KEY")
+	if err != nil {
+		return nil, err
+	}
+	encKey, err := parseHexKey(rawEncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("config: Failed to parse encryption key: %w", err)
 	}
@@ -47,13 +63,13 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port:          env("PORT", ":8080"),
-		DatabaseURL:   mustEnv("DATABASE_URL"),
-		DockerHost:    os.Getenv("DOCKER_HOST"),
-		CaddyAdminURL: caddyURL,
-		BaseDomain:    mustEnv("BASE_DOMAIN"),
-		EncryptionKey: encKey,
-		JWTSecret:     mustEnv("JWT_SECRET"),
+		Port:           env("PORT", ":8080"),
+		DatabaseURL:    databaseURL,
+		DockerHost:     os.Getenv("DOCKER_HOST"),
+		CaddyAdminURL:  caddyURL,
+		BaseDomain:     baseDomain,
+		EncryptionKey:  encKey,
+		JWTSecret:      jwtSecret,
 		TokenTTL:       ttl,
 		AdminUsername:  os.Getenv("ADMIN_USERNAME"),
 		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
@@ -79,12 +95,12 @@ func requireLocalhost(raw string) error {
 	return fmt.Errorf("must point at localhost/loopback, got %q", host)
 }
 
-func mustEnv(key string) string {
+func mustEnv(key string) (string, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		panic(fmt.Sprintf("config: Environment variable %s is required", key))
+		return "", fmt.Errorf("config: environment variable %s is required", key)
 	}
-	return value
+	return value, nil
 }
 
 func env(key, fallback string) string {

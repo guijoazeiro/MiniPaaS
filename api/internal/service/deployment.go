@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -166,9 +167,12 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if target.ImageTag == "" {
 		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
 	}
-
 	var fromID uuid.UUID
-	if current, err := s.deps.GetActive(ctx, app.ID); err == nil {
+	current, err := s.deps.GetActive(ctx, app.ID)
+	if err == nil {
+		if current.ID == target.ID {
+			return domain.Deployment{}, domain.ErrDeploymentActive
+		}
 		fromID = current.ID
 		if current.ContainerID != "" {
 			if err := s.docker.StopContainer(ctx, current.ContainerID); err != nil {
@@ -181,6 +185,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 		if err := s.deps.UpdateStatus(ctx, current.ID, domain.DeploymentStatusRolledBack); err != nil {
 			s.log.Warn("rollback: mark current rolled_back", "err", err)
 		}
+	} else if !errors.Is(err, domain.ErrDeploymentNotFound) {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: get active deployment: %w", err)
+	}
+	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
+		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
 	}
 
 	envVars, err := s.env.Decrypted(ctx, app.ID)

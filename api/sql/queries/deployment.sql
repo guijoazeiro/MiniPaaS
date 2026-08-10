@@ -38,6 +38,11 @@ SELECT * FROM deployments WHERE status = 'running';
 
 -- name: ListDeploymentsForRetention :many
 SELECT * FROM deployments
-WHERE app_id = @app_id
-ORDER BY created_at DESC
-OFFSET @keep;
+WHERE deployments.id IN (
+    SELECT d.id FROM deployments d
+    WHERE d.app_id = @app_id
+    ORDER BY d.created_at DESC
+    OFFSET @keep
+)
+AND status NOT IN ('running', 'pending', 'building')
+ORDER BY created_at DESC;

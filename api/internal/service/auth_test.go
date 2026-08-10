@@ -17,6 +17,7 @@ type fakeUserStore struct {
 	users  map[string]domain.User
 	countN int64
 	create func(username, hash string) (domain.User, error)
+	get    func(username string) (domain.User, error)
 }
 
 func (f *fakeUserStore) Create(_ context.Context, u, h string) (domain.User, error) {
@@ -32,10 +33,24 @@ func (f *fakeUserStore) Create(_ context.Context, u, h string) (domain.User, err
 	return user, nil
 }
 func (f *fakeUserStore) GetByUsername(_ context.Context, u string) (domain.User, error) {
+	if f.get != nil {
+		return f.get(u)
+	}
 	if user, ok := f.users[u]; ok {
 		return user, nil
 	}
 	return domain.User{}, domain.ErrInvalidCredentials
+}
+
+func TestLoginPreservesStoreErrors(t *testing.T) {
+	svc, users := newAuthSvc(t)
+	dbErr := errors.New("database unavailable")
+	users.get = func(string) (domain.User, error) { return domain.User{}, dbErr }
+
+	_, _, err := svc.Login(context.Background(), "alice", "hunter2")
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("Login() error = %v, want wrapped %v", err, dbErr)
+	}
 }
 func (f *fakeUserStore) Count(_ context.Context) (int64, error) { return f.countN, nil }
 

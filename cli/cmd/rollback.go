@@ -47,7 +47,7 @@ func pickDeployment(app string) (string, error) {
 	}
 	eligible := []api.Deployment{}
 	for _, d := range deps {
-		if d.ImageTag == "" || d.Status == "running" || d.Status == "pending" || d.Status == "building" {
+		if d.ImageTag == "" || d.Status == "running" || d.Status == "pending" || d.Status == "building" || d.Status == "failed" {
 			continue
 		}
 		eligible = append(eligible, d)

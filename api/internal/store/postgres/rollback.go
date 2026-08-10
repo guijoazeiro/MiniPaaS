@@ -17,13 +17,20 @@ func NewRollbackStore(q *sqlc.Queries) *RollbackStore { return &RollbackStore{q:
 
 func (s *RollbackStore) Record(ctx context.Context, appID, fromDep, toDep uuid.UUID, triggeredBy string) error {
 	err := s.q.RecordRollback(ctx, sqlc.RecordRollbackParams{
-		AppID:           uuidToPG(appID),
-		FromDeployment:  uuidToPG(fromDep),
-		ToDeployment:    uuidToPG(toDep),
-		TriggeredBy:     pgtype.Text{String: triggeredBy, Valid: triggeredBy != ""},
+		AppID:          uuidToPG(appID),
+		FromDeployment: nullableUUID(fromDep),
+		ToDeployment:   uuidToPG(toDep),
+		TriggeredBy:    pgtype.Text{String: triggeredBy, Valid: triggeredBy != ""},
 	})
 	if err != nil {
 		return fmt.Errorf("store.RecordRollback: %w", err)
 	}
 	return nil
+}
+
+func nullableUUID(id uuid.UUID) pgtype.UUID {
+	if id == uuid.Nil {
+		return pgtype.UUID{}
+	}
+	return uuidToPG(id)
 }

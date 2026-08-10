@@ -28,7 +28,10 @@ func NewAuthService(users store.UserStore, jwtSecret []byte, tokenTTL time.Durat
 func (s *AuthService) Login(ctx context.Context, username, password string) (token string, expiresAt time.Time, err error) {
 	u, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
-		return "", time.Time{}, domain.ErrInvalidCredentials
+		if errors.Is(err, domain.ErrInvalidCredentials) {
+			return "", time.Time{}, domain.ErrInvalidCredentials
+		}
+		return "", time.Time{}, fmt.Errorf("auth.Login: get user: %w", err)
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return "", time.Time{}, domain.ErrInvalidCredentials

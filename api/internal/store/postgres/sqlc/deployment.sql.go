@@ -132,9 +132,14 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 
 const listDeploymentsForRetention = `-- name: ListDeploymentsForRetention :many
 SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments
-WHERE app_id = $1
+WHERE deployments.id IN (
+    SELECT d.id FROM deployments d
+    WHERE d.app_id = $1
+    ORDER BY d.created_at DESC
+    OFFSET $2
+)
+AND status NOT IN ('running', 'pending', 'building')
 ORDER BY created_at DESC
-OFFSET $2
 `
 
 type ListDeploymentsForRetentionParams struct {
