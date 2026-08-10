@@ -29,6 +29,10 @@ test("keeps the product style free of gradients and starter preview code", async
   assert.match(page, /\/apps\/.*\/deployments/);
   assert.match(page, /\/logs\?follow=true/);
   assert.match(page, /minipaas-theme/);
+  assert.match(page, /auth\/web-login/);
+  assert.match(page, /auth\/logout/);
+  assert.match(page, /function Landing/);
+  assert.match(page, /Mostrar senha/);
   assert.match(layout, /MiniPaaS — Control Plane/);
   assert.match(layout, /og\.png/);
   assert.match(css, /backdrop-filter/);

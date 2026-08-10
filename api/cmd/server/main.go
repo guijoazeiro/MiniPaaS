@@ -105,6 +105,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	r.POST("/auth/login", authH.Login)
+	r.POST("/auth/web-login", authH.WebLogin)
+	r.POST("/auth/logout", authH.Logout)
 
 	auth := r.Group("/", middleware.Auth(authSvc))
 
