@@ -25,6 +25,7 @@ type Config struct {
 	HealthCheckInterval time.Duration
 	RestartPolicy       string
 	RestartMaxRetries   int
+	DashboardOrigin     string
 	LogLevel            string
 }
 
@@ -92,6 +93,7 @@ func Load() (*Config, error) {
 		HealthCheckInterval: healthCheckInterval,
 		RestartPolicy:       restartPolicy,
 		RestartMaxRetries:   restartMaxRetries,
+		DashboardOrigin:     env("DASHBOARD_ORIGIN", "http://localhost:3000"),
 		LogLevel:            env("LOG_LEVEL", "info"),
 	}, nil
 
