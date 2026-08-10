@@ -6,6 +6,9 @@ import (
 	"io"
 	"reflect"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 )
 
 func TestLineWriterSplitsAndBuffers(t *testing.T) {
@@ -21,6 +24,23 @@ func TestLineWriterSplitsAndBuffers(t *testing.T) {
 	w.flush()
 	if want := []string{"hello world", "foo", "bar"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after flush: got %v, want %v", got, want)
+	}
+}
+
+func TestLogDeploymentFallsBackToFailedDeployment(t *testing.T) {
+	appID := uuid.New()
+	failed := domain.Deployment{ID: uuid.New(), AppID: appID, Status: domain.DeploymentStatusFailed, ContainerID: "stopped-container"}
+	h := New(nil, nil, fakeDeploymentLookup{
+		activeErr:   domain.ErrDeploymentNotFound,
+		deployments: []domain.Deployment{failed},
+	}, nil)
+
+	got, err := h.logDeployment(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != failed.ID {
+		t.Fatalf("logDeployment() = %s, want %s", got.ID, failed.ID)
 	}
 }
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -21,14 +22,19 @@ type AppStopper interface {
 	StopApp(ctx context.Context, app domain.App) error
 }
 
+type AppHealth interface {
+	ContainerState(ctx context.Context, appID uuid.UUID) (string, error)
+}
+
 type AppHandler struct {
 	svc     AppService
 	stopper AppStopper
+	health  AppHealth
 	log     *slog.Logger
 }
 
-func NewAppHandler(svc AppService, stopper AppStopper, log *slog.Logger) *AppHandler {
-	return &AppHandler{svc: svc, stopper: stopper, log: log}
+func NewAppHandler(svc AppService, stopper AppStopper, health AppHealth, log *slog.Logger) *AppHandler {
+	return &AppHandler{svc: svc, stopper: stopper, health: health, log: log}
 }
 
 type createAppReq struct {
@@ -66,6 +72,14 @@ func (h *AppHandler) Get(c *gin.Context) {
 	if err != nil {
 		respondError(c, h.log, err)
 		return
+	}
+	if h.health != nil {
+		state, err := h.health.ContainerState(c.Request.Context(), app.ID)
+		if err == nil {
+			app.ContainerState = state
+		} else if !errors.Is(err, domain.ErrDeploymentNotFound) {
+			h.log.Warn("container state", "app", app.Name, "err", err)
+		}
 	}
 	c.JSON(http.StatusOK, app)
 }

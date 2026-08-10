@@ -11,18 +11,21 @@ import (
 )
 
 type Config struct {
-	Port           string
-	DatabaseURL    string
-	DockerHost     string
-	CaddyAdminURL  string
-	BaseDomain     string
-	EncryptionKey  []byte
-	JWTSecret      string
-	TokenTTL       time.Duration
-	AdminUsername  string
-	AdminPassword  string
-	ImageRetention int
-	LogLevel       string
+	Port                string
+	DatabaseURL         string
+	DockerHost          string
+	CaddyAdminURL       string
+	BaseDomain          string
+	EncryptionKey       []byte
+	JWTSecret           string
+	TokenTTL            time.Duration
+	AdminUsername       string
+	AdminPassword       string
+	ImageRetention      int
+	HealthCheckInterval time.Duration
+	RestartPolicy       string
+	RestartMaxRetries   int
+	LogLevel            string
 }
 
 func Load() (*Config, error) {
@@ -61,20 +64,35 @@ func Load() (*Config, error) {
 	if err != nil || retention < 1 {
 		return nil, fmt.Errorf("config: IMAGE_RETENTION must be a positive integer")
 	}
+	healthCheckInterval, err := time.ParseDuration(env("HEALTH_CHECK_INTERVAL", "30s"))
+	if err != nil || healthCheckInterval <= 0 {
+		return nil, fmt.Errorf("config: HEALTH_CHECK_INTERVAL must be a positive duration")
+	}
+	restartPolicy := env("RESTART_POLICY", "on-failure")
+	if restartPolicy != "no" && restartPolicy != "always" && restartPolicy != "on-failure" && restartPolicy != "unless-stopped" {
+		return nil, fmt.Errorf("config: RESTART_POLICY is invalid")
+	}
+	restartMaxRetries, err := strconv.Atoi(env("RESTART_MAX_RETRIES", "3"))
+	if err != nil || restartMaxRetries < 0 {
+		return nil, fmt.Errorf("config: RESTART_MAX_RETRIES must be a non-negative integer")
+	}
 
 	return &Config{
-		Port:           env("PORT", ":8080"),
-		DatabaseURL:    databaseURL,
-		DockerHost:     os.Getenv("DOCKER_HOST"),
-		CaddyAdminURL:  caddyURL,
-		BaseDomain:     baseDomain,
-		EncryptionKey:  encKey,
-		JWTSecret:      jwtSecret,
-		TokenTTL:       ttl,
-		AdminUsername:  os.Getenv("ADMIN_USERNAME"),
-		AdminPassword:  os.Getenv("ADMIN_PASSWORD"),
-		ImageRetention: retention,
-		LogLevel:       env("LOG_LEVEL", "info"),
+		Port:                env("PORT", ":8080"),
+		DatabaseURL:         databaseURL,
+		DockerHost:          os.Getenv("DOCKER_HOST"),
+		CaddyAdminURL:       caddyURL,
+		BaseDomain:          baseDomain,
+		EncryptionKey:       encKey,
+		JWTSecret:           jwtSecret,
+		TokenTTL:            ttl,
+		AdminUsername:       os.Getenv("ADMIN_USERNAME"),
+		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
+		ImageRetention:      retention,
+		HealthCheckInterval: healthCheckInterval,
+		RestartPolicy:       restartPolicy,
+		RestartMaxRetries:   restartMaxRetries,
+		LogLevel:            env("LOG_LEVEL", "info"),
 	}, nil
 
 }

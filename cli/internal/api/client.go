@@ -27,10 +27,11 @@ func New(base, token string) *Client {
 func (c *Client) Host() string { return c.base }
 
 type App struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	PublicURL string `json:"public_url,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	ContainerState string `json:"container_state,omitempty"`
+	PublicURL      string `json:"public_url,omitempty"`
 }
 
 type Deployment struct {

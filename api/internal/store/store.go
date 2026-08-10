@@ -42,6 +42,7 @@ type DeploymentStore interface {
 	Create(ctx context.Context, appID uuid.UUID, imageTag string) (domain.Deployment, error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
 	GetActive(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
+	ListRunning(ctx context.Context) ([]domain.Deployment, error)
 	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
 	ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error)
 	UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
@@ -13,16 +14,22 @@ import (
 )
 
 type RunOptions struct {
-	Image         string
-	Name          string
-	Env           map[string]string
-	ContainerPort string
-	RestartPolicy string
+	Image             string
+	Name              string
+	Env               map[string]string
+	ContainerPort     string
+	RestartPolicy     string
+	RestartMaxRetries int
 }
 
 type ContainerInfo struct {
 	ID   string
 	Port int
+}
+
+type ContainerState struct {
+	Status  string
+	Running bool
 }
 
 type Client struct {
@@ -78,6 +85,7 @@ func (c *Client) RunContainer(ctx context.Context, opts RunOptions) (ContainerIn
 		},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
 	}
+	hostCfg.RestartPolicy.MaximumRetryCount = opts.RestartMaxRetries
 
 	created, err := c.cli.ContainerCreate(ctx, cfg, hostCfg, &network.NetworkingConfig{}, nil, opts.Name)
 	if err != nil {
@@ -100,6 +108,20 @@ func (c *Client) RunContainer(ctx context.Context, opts RunOptions) (ContainerIn
 	}
 
 	return ContainerInfo{ID: created.ID, Port: port}, nil
+}
+
+func (c *Client) InspectContainer(ctx context.Context, id string) (ContainerState, error) {
+	inspect, err := c.cli.ContainerInspect(ctx, id)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return ContainerState{Status: "missing"}, nil
+		}
+		return ContainerState{}, fmt.Errorf("docker.InspectContainer: %w", err)
+	}
+	if inspect.State == nil {
+		return ContainerState{Status: "unknown"}, nil
+	}
+	return ContainerState{Status: inspect.State.Status, Running: inspect.State.Running}, nil
 }
 
 func (c *Client) StopContainer(ctx context.Context, id string) error {

@@ -39,6 +39,20 @@ func (f fakeDockerLogs) StreamLogs(_ context.Context, _ string, _ docker.LogOpti
 	return pr, nil
 }
 
+type fakeDeploymentLookup struct {
+	active      domain.Deployment
+	activeErr   error
+	deployments []domain.Deployment
+}
+
+func (f fakeDeploymentLookup) GetActive(_ context.Context, _ uuid.UUID) (domain.Deployment, error) {
+	return f.active, f.activeErr
+}
+
+func (f fakeDeploymentLookup) ListByApp(_ context.Context, _ uuid.UUID, _ int) ([]domain.Deployment, error) {
+	return f.deployments, nil
+}
+
 func makeDockerStream(t *testing.T, entries []struct{ stream, line string }) []byte {
 	t.Helper()
 	buf := &strings.Builder{}
@@ -75,12 +89,7 @@ func TestServeEndToEnd(t *testing.T) {
 	h := New(
 		fakeAppLookup{app: app},
 		fakeDockerLogs{payload: payload},
-		func(_ context.Context, id uuid.UUID) (domain.Deployment, error) {
-			if id != app.ID {
-				return domain.Deployment{}, domain.ErrDeploymentNotFound
-			}
-			return dep, nil
-		},
+		fakeDeploymentLookup{active: dep},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
@@ -100,10 +109,12 @@ func TestServeEndToEnd(t *testing.T) {
 	defer conn.Close()
 
 	var got []Frame
+	var closeErr error
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			closeErr = err
 			break
 		}
 		var f Frame
@@ -111,6 +122,9 @@ func TestServeEndToEnd(t *testing.T) {
 			t.Fatalf("decode: %v (raw=%s)", err, msg)
 		}
 		got = append(got, f)
+	}
+	if !websocket.IsCloseError(closeErr, websocket.CloseNormalClosure) {
+		t.Fatalf("close error = %v, want normal closure", closeErr)
 	}
 
 	if len(got) != 3 {
@@ -133,7 +147,7 @@ func TestServeUnknownApp(t *testing.T) {
 	h := New(
 		fakeAppLookup{app: domain.App{Name: "other"}},
 		fakeDockerLogs{},
-		func(context.Context, uuid.UUID) (domain.Deployment, error) { return domain.Deployment{}, nil },
+		fakeDeploymentLookup{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	r := gin.New()

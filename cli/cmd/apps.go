@@ -57,6 +57,9 @@ var appsInfoCmd = &cobra.Command{
 		}
 		fmt.Printf("%s\n", app.Name)
 		fmt.Printf("  status:  %s\n", app.Status)
+		if app.ContainerState != "" {
+			fmt.Printf("  container: %s\n", app.ContainerState)
+		}
 		if app.PublicURL != "" {
 			fmt.Printf("  url:     %s\n", app.PublicURL)
 		}
