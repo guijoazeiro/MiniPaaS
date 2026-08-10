@@ -16,7 +16,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 5 | Rollback + image retention | ✅ done |
 | 6 | Health checks | ✅ done |
 | 7 | Dashboard (Next.js) | ✅ done |
-| 8 | Polish, CI, release | — |
+| 8 | Polish, CI, release | ✅ done |
 
 ## Stack
 
@@ -431,7 +431,7 @@ go build -o minip .
 
 ### Tests
 
-Automated tests are unit tests only for now — no Docker or Postgres required. The end-to-end walkthrough above is the manual Docker/Postgres/Caddy validation path; automated integration tests land in phase 8.
+The default automated tests are unit tests, so they do not require Docker or PostgreSQL. The end-to-end walkthrough above remains the manual Docker/Postgres/Caddy validation path.
 
 ```bash
 # From the repo root — runs the api module tests
@@ -442,6 +442,9 @@ cd cli && go test ./...
 
 # Both
 go test ./... && (cd cli && go test ./...)
+
+# PostgreSQL integration test (after `docker compose up -d` and migrations)
+DATABASE_URL='postgres://postgres:postgres@localhost:5432/minipaas?sslmode=disable' go test -count=1 -tags=integration ./api/internal/store/postgres
 ```
 
 Coverage today:
@@ -452,8 +455,13 @@ Coverage today:
 - `ws` — line splitter + end-to-end WS handler with a fake Docker stream (via `stdcopy.NewStdWriter`) proving demux, ordering, and frame format
 - `health` — exited/missing containers transition their deployment and app to `failed`; current container state lookup
 - `cli/tarball` — kept/skipped paths, slash-normalized entries
+- `store/postgres` (integration tag) — app persistence, uniqueness constraints, status and public URL updates against a real PostgreSQL instance
 
-`-race` needs CGO (not enabled on Windows by default); CI (phase 8) will run it on Linux.
+`-race` needs CGO (not enabled on Windows by default); CI runs it on Linux. GitHub Actions also vets the API, runs the CLI and dashboard checks, applies the migrations, and runs the PostgreSQL integration test.
+
+### Releases
+
+Pushing a tag in the `v*` format (for example, `v0.1.0`) starts the release workflow. It builds the API server, migration command, and CLI for Linux amd64, macOS amd64/arm64, and Windows amd64, then creates a GitHub release with those binaries.
 
 ## License
 
