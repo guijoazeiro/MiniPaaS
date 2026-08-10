@@ -87,7 +87,7 @@ func main() {
 
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
-	depH := handler.NewDeploymentHandler(depSvc, appStore, log)
+	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
 
@@ -130,6 +130,10 @@ func main() {
 		Addr:              cfg.Port,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// Global ReadTimeout and WriteTimeout are omitted because deploy uploads
+		// and long-lived WebSockets have different lifetimes. Upload bodies are
+		// size-limited in their handler; WebSockets manage their own deadlines.
 	}
 
 	go func() {

@@ -25,6 +25,7 @@ type Config struct {
 	HealthCheckInterval time.Duration
 	RestartPolicy       string
 	RestartMaxRetries   int
+	MaxDeploySize       int64
 	DashboardOrigin     string
 	LogLevel            string
 }
@@ -77,6 +78,10 @@ func Load() (*Config, error) {
 	if err != nil || restartMaxRetries < 0 {
 		return nil, fmt.Errorf("config: RESTART_MAX_RETRIES must be a non-negative integer")
 	}
+	maxDeploySizeMB, err := strconv.ParseInt(env("MAX_DEPLOY_SIZE_MB", "100"), 10, 64)
+	if err != nil || maxDeploySizeMB <= 0 || maxDeploySizeMB > 10_240 {
+		return nil, fmt.Errorf("config: MAX_DEPLOY_SIZE_MB must be an integer between 1 and 10240")
+	}
 
 	return &Config{
 		Port:                env("PORT", ":8080"),
@@ -93,6 +98,7 @@ func Load() (*Config, error) {
 		HealthCheckInterval: healthCheckInterval,
 		RestartPolicy:       restartPolicy,
 		RestartMaxRetries:   restartMaxRetries,
+		MaxDeploySize:       maxDeploySizeMB * 1024 * 1024,
 		DashboardOrigin:     env("DASHBOARD_ORIGIN", "http://localhost:3000"),
 		LogLevel:            env("LOG_LEVEL", "info"),
 	}, nil
