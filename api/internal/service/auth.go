@@ -21,19 +21,34 @@ type AuthService struct {
 	log       *slog.Logger
 }
 
+var dummyPasswordHash = func() []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte("minipaas-dummy-password"), bcrypt.DefaultCost)
+	if err != nil {
+		panic("generate dummy bcrypt hash: " + err.Error())
+	}
+	return hash
+}()
+
 func NewAuthService(users store.UserStore, jwtSecret []byte, tokenTTL time.Duration, log *slog.Logger) *AuthService {
 	return &AuthService{users: users, jwtSecret: jwtSecret, tokenTTL: tokenTTL, log: log}
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (token string, expiresAt time.Time, err error) {
 	u, err := s.users.GetByUsername(ctx, username)
+	userExists := true
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCredentials) {
-			return "", time.Time{}, domain.ErrInvalidCredentials
+			userExists = false
+		} else {
+			return "", time.Time{}, fmt.Errorf("auth.Login: get user: %w", err)
 		}
-		return "", time.Time{}, fmt.Errorf("auth.Login: get user: %w", err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
+	hash := dummyPasswordHash
+	if userExists {
+		hash = []byte(u.PasswordHash)
+	}
+	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(password))
+	if !userExists || passwordErr != nil {
 		return "", time.Time{}, domain.ErrInvalidCredentials
 	}
 	expiresAt = time.Now().Add(s.tokenTTL)
