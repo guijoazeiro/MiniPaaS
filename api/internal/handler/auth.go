@@ -43,5 +43,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		respondError(c, h.log, err)
 		return
 	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "minipaas_token",
+		Value:    tok,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   c.Request.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  exp,
+	})
 	c.JSON(http.StatusOK, loginResp{Token: tok, ExpiresAt: exp})
 }

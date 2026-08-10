@@ -20,11 +20,19 @@ const (
 func Auth(p TokenParser) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
+		raw := strings.TrimPrefix(h, "Bearer ")
 		if !strings.HasPrefix(h, "Bearer ") {
+			var err error
+			raw, err = c.Cookie("minipaas_token")
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+				return
+			}
+		}
+		if raw == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
 			return
 		}
-		raw := strings.TrimPrefix(h, "Bearer ")
 		id, name, err := p.ParseToken(raw)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
