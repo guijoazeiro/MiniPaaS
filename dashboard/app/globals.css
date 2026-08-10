@@ -16,3 +16,14 @@
 @media (max-width: 960px) { .landing-hero { grid-template-columns: 1fr; gap: 0; padding: 36px 0 52px; }.hero-copy { padding-top: 34px; }.hero-art { max-width: 650px; width: 100%; }.capabilities { grid-template-columns: 1fr; gap: 0; }.capabilities article { display: grid; grid-template-columns: 45px 1fr; gap: 0 14px; }.capabilities article > span { grid-row: span 2; }.capabilities h2 { margin: 0 0 7px; } }
 @media (max-width: 640px) { .login-card { padding: 28px; }.topbar { align-items: flex-start; flex-direction: column; }.topbar-actions { width: 100%; }.topbar-actions .button { flex: 1; }.sidebar { overflow-x: auto; }.brand { padding-left: 0; }.sidebar nav { flex: 1; }.nav-item { font-size: 11px; white-space: nowrap; }.workspace { padding: 24px 16px 44px; }.command-panel, .panel { padding: 17px; }.selected-header { align-items: flex-start; flex-direction: column; }.stats-row { grid-template-columns: 1fr; }.deploy-box { grid-template-columns: 1fr; }.file-picker { min-width: 0; }.env-form { grid-template-columns: 1fr; }.status-pill.compact { margin-left: 0; }.deployment-row { flex-wrap: wrap; }.deployment-row > div { width: calc(100% - 22px); }.log-output { height: 260px; } }
 @media (max-width: 640px) { .landing-nav, .landing-hero, .capabilities { width: min(100% - 32px, 1280px); }.landing-nav-actions .secondary { display: none; }.landing-hero { padding-top: 12px; }.hero-copy h1 { font-size: clamp(54px, 18vw, 76px); }.hero-description { font-size: 14px; }.hero-actions { align-items: flex-start; flex-direction: column; }.hero-art { grid-template-columns: 45px 1fr; min-height: 420px; border-radius: 12px; }.art-rail { gap: 22px; padding-top: 23px; }.art-content { padding: 23px 15px 16px; }.art-title strong { font-size: 17px; }.art-title button { display: none; }.art-metrics { gap: 7px; }.art-metrics strong { font-size: 20px; }.art-head, .art-row { grid-template-columns: 1fr .75fr; }.art-head span:last-child, .art-row > span:last-child { display: none; }.art-footer small { display: none; }.hero-grid { display: none; } }
+
+/* Scroll do terminal: estreito, técnico e consistente entre navegadores. */
+.log-output {
+  scrollbar-width: thin;
+  scrollbar-color: var(--violet) #101010;
+}
+.log-output::-webkit-scrollbar { width: 9px; height: 9px; }
+.log-output::-webkit-scrollbar-track { margin: 7px 0; border-radius: 99px; background: #101010; }
+.log-output::-webkit-scrollbar-thumb { min-height: 34px; border: 2px solid #050505; border-radius: 99px; background: var(--violet); }
+.log-output::-webkit-scrollbar-thumb:hover { background: var(--violet-ink); }
+.log-output::-webkit-scrollbar-corner { background: #050505; }
