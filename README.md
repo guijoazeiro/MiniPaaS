@@ -15,7 +15,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 4 | WebSocket log streaming | ✅ done |
 | 5 | Rollback + image retention | ✅ done |
 | 6 | Health checks | ✅ done |
-| 7 | Dashboard (Next.js) | — |
+| 7 | Dashboard (Next.js) | ✅ done |
 | 8 | Polish, CI, release | — |
 
 ## Stack
