@@ -257,6 +257,8 @@ WS     /apps/:name/logs?follow=true&tail=100
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
 ```
 
+Rollback is synchronous: the API responds after Docker starts the selected image and Caddy updates its route.
+
 Deployment status transitions:
 
 ```
