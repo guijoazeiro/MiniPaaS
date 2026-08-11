@@ -17,7 +17,8 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 6 | Health checks | ✅ done |
 | 7 | Dashboard (Next.js) | ✅ done |
 | 8 | Polish, CI, release | ✅ done |
-| 9.1 | Deploy from public GitHub repositories | 🚧 implemented, awaiting manual validation |
+| 9.1 | Deploy from public GitHub repositories | ✅ done |
+| 9.1.1 | Dashboard navigation and operational UX | 🚧 implemented, awaiting manual validation |
 
 ## Stack
 
@@ -33,7 +34,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | Secrets | AES-256-GCM | Authenticated encryption, random nonce per record |
 | Log streaming | gorilla/websocket + docker/stdcopy | Multiplexed stdout/stderr → per-line JSON frames |
 | CLI | Go + Cobra | Single-binary target, easy release |
-| Dashboard | Next.js 14 (App Router) | Ships last, consumes the same API as the CLI |
+| Dashboard | Next.js 16 / Vinext (App Router) | Route-based control plane consuming the same API as the CLI |
 
 ## Quick start
 
@@ -303,6 +304,8 @@ POST   /apps/:name/deployments        multipart source=<tar> → 202 Deployment 
 POST   /apps/:name/deployments/git    { branch? } → 202 Deployment (clones the connected public repository)
 GET    /apps/:name/deployments        → []Deployment
 GET    /apps/:name/deployments/:id    → Deployment
+GET    /deployments?page=1&per_page=50&app=&status=
+                                       → { items, page, per_page, total }
 
 PUT    /apps/:name/source/git         { repository, branch?, build_context?, dockerfile_path? } → GitSource
 GET    /apps/:name/source/git         → GitSource
@@ -332,6 +335,17 @@ running           → superseded  (replaced by a newer deploy)
 ```
 
 A stopped deployment can be started again from the dashboard with **Reativar**, which reuses the retained image through the rollback path.
+
+## Dashboard navigation
+
+After login, the dashboard opens the project directory instead of selecting the most recent application automatically.
+
+- `/dashboard/projects` lists every project and its current state.
+- `/dashboard/projects/:name` contains overview, deployment history, logs, and configuration tabs.
+- `/dashboard/deployments` lists deployments from every project with project/status filters and pagination.
+- `/dashboard/logs` provides a dedicated live console with a project selector. Scrolling up pauses automatic following; **Ir para o final** resumes it.
+
+Theme and logout controls live in the top navigation. The dark theme uses a near-black base and translucent blur across navigation and operational surfaces. Very low-opacity, solid ambient forms are restricted to the page background so the glass remains perceptible; buttons, text, cards, and controls do not use decorative gradients.
 
 ## CLI
 
