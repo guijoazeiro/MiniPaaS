@@ -103,6 +103,41 @@ func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit 
 	return out, nil
 }
 
+func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, limit, offset int) ([]domain.DeploymentListItem, error) {
+	rows, err := s.q.ListDeployments(ctx, sqlc.ListDeploymentsParams{
+		AppName: pgtype.Text{String: appName, Valid: appName != ""},
+		Status:  pgtype.Text{String: status, Valid: status != ""},
+		Lim:     int32(limit),
+		Off:     int32(offset),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListDeployments: %w", err)
+	}
+	out := make([]domain.DeploymentListItem, len(rows))
+	for i, row := range rows {
+		deployment := toDomainDeployment(sqlc.Deployment{
+			ID: row.ID, AppID: row.AppID, ImageTag: row.ImageTag, Status: row.Status,
+			ContainerID: row.ContainerID, Port: row.Port, CommitSha: row.CommitSha,
+			DurationMs: row.DurationMs, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
+			SourceType: row.SourceType, Repository: row.Repository, Branch: row.Branch,
+			CommitAuthor: row.CommitAuthor, CommitMessage: row.CommitMessage,
+		})
+		out[i] = domain.DeploymentListItem{Deployment: deployment, AppName: row.AppName}
+	}
+	return out, nil
+}
+
+func (s *DeploymentStore) CountAll(ctx context.Context, appName, status string) (int64, error) {
+	total, err := s.q.CountDeployments(ctx, sqlc.CountDeploymentsParams{
+		AppName: pgtype.Text{String: appName, Valid: appName != ""},
+		Status:  pgtype.Text{String: status, Valid: status != ""},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("store.CountDeployments: %w", err)
+	}
+	return total, nil
+}
+
 func (s *DeploymentStore) ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error) {
 	rows, err := s.q.ListDeploymentsForRetention(ctx, sqlc.ListDeploymentsForRetentionParams{
 		AppID: uuidToPG(appID),

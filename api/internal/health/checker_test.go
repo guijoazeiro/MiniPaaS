@@ -33,6 +33,12 @@ func (f *fakeDeploymentStore) GetActive(context.Context, uuid.UUID) (domain.Depl
 func (f *fakeDeploymentStore) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return f.recent, nil
 }
+func (f *fakeDeploymentStore) ListAll(context.Context, string, string, int, int) ([]domain.DeploymentListItem, error) {
+	return nil, nil
+}
+func (f *fakeDeploymentStore) CountAll(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
 func (f *fakeDeploymentStore) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return nil, errors.New("not implemented")
 }

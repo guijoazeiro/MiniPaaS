@@ -67,6 +67,18 @@ type Deployment struct {
 	FinishedAt    *time.Time       `json:"finished_at,omitempty"`
 }
 
+type DeploymentListItem struct {
+	Deployment
+	AppName string `json:"app_name"`
+}
+
+type DeploymentPage struct {
+	Items   []DeploymentListItem `json:"items"`
+	Page    int                  `json:"page"`
+	PerPage int                  `json:"per_page"`
+	Total   int64                `json:"total"`
+}
+
 type GitSource struct {
 	AppID          uuid.UUID `json:"app_id"`
 	Repository     string    `json:"repository"`

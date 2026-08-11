@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDeployments = `-- name: CountDeployments :one
+SELECT COUNT(*)
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE ($1::text IS NULL OR a.name = $1)
+  AND ($2::text IS NULL OR d.status = $2)
+`
+
+type CountDeploymentsParams struct {
+	AppName pgtype.Text `json:"app_name"`
+	Status  pgtype.Text `json:"status"`
+}
+
+func (q *Queries) CountDeployments(ctx context.Context, arg CountDeploymentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeployments, arg.AppName, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createDeployment = `-- name: CreateDeployment :one
 INSERT INTO deployments (app_id, image_tag)
 VALUES ($1, $2)
@@ -141,6 +161,84 @@ func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deploy
 		&i.CommitMessage,
 	)
 	return i, err
+}
+
+const listDeployments = `-- name: ListDeployments :many
+SELECT d.id, d.app_id, d.image_tag, d.status, d.container_id, d.port, d.commit_sha, d.duration_ms, d.created_at, d.finished_at, d.source_type, d.repository, d.branch, d.commit_author, d.commit_message, a.name AS app_name
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE ($1::text IS NULL OR a.name = $1)
+  AND ($2::text IS NULL OR d.status = $2)
+ORDER BY d.created_at DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListDeploymentsParams struct {
+	AppName pgtype.Text `json:"app_name"`
+	Status  pgtype.Text `json:"status"`
+	Off     int32       `json:"off"`
+	Lim     int32       `json:"lim"`
+}
+
+type ListDeploymentsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	AppID         pgtype.UUID        `json:"app_id"`
+	ImageTag      string             `json:"image_tag"`
+	Status        string             `json:"status"`
+	ContainerID   pgtype.Text        `json:"container_id"`
+	Port          pgtype.Int4        `json:"port"`
+	CommitSha     pgtype.Text        `json:"commit_sha"`
+	DurationMs    pgtype.Int4        `json:"duration_ms"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+	SourceType    string             `json:"source_type"`
+	Repository    pgtype.Text        `json:"repository"`
+	Branch        pgtype.Text        `json:"branch"`
+	CommitAuthor  pgtype.Text        `json:"commit_author"`
+	CommitMessage pgtype.Text        `json:"commit_message"`
+	AppName       string             `json:"app_name"`
+}
+
+func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams) ([]ListDeploymentsRow, error) {
+	rows, err := q.db.Query(ctx, listDeployments,
+		arg.AppName,
+		arg.Status,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeploymentsRow
+	for rows.Next() {
+		var i ListDeploymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ImageTag,
+			&i.Status,
+			&i.ContainerID,
+			&i.Port,
+			&i.CommitSha,
+			&i.DurationMs,
+			&i.CreatedAt,
+			&i.FinishedAt,
+			&i.SourceType,
+			&i.Repository,
+			&i.Branch,
+			&i.CommitAuthor,
+			&i.CommitMessage,
+			&i.AppName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDeploymentsByApp = `-- name: ListDeploymentsByApp :many

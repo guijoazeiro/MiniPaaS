@@ -20,6 +20,8 @@ type rollbackDeploymentStore struct {
 	recent      []domain.Deployment
 	activeCalls int
 	statuses    []domain.DeploymentStatus
+	globalItems []domain.DeploymentListItem
+	globalTotal int64
 }
 
 func (s *rollbackDeploymentStore) Create(context.Context, uuid.UUID, string) (domain.Deployment, error) {
@@ -37,6 +39,27 @@ func (s *rollbackDeploymentStore) ListRunning(context.Context) ([]domain.Deploym
 }
 func (s *rollbackDeploymentStore) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return s.recent, nil
+}
+func (s *rollbackDeploymentStore) ListAll(context.Context, string, string, int, int) ([]domain.DeploymentListItem, error) {
+	return s.globalItems, nil
+}
+func (s *rollbackDeploymentStore) CountAll(context.Context, string, string) (int64, error) {
+	return s.globalTotal, nil
+}
+
+func TestListAllReturnsPaginatedDeployments(t *testing.T) {
+	deps := &rollbackDeploymentStore{
+		globalItems: []domain.DeploymentListItem{{Deployment: domain.Deployment{ID: uuid.New()}, AppName: "api"}},
+		globalTotal: 26,
+	}
+	svc := newRollbackService(deps, &rollbackAppStore{}, &rollbackDocker{}, &rollbackEnv{})
+	page, err := svc.ListAll(context.Background(), "api", "failed", 2, 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Page != 2 || page.PerPage != 25 || page.Total != 26 || len(page.Items) != 1 || page.Items[0].AppName != "api" {
+		t.Fatalf("page = %+v", page)
+	}
 }
 func (s *rollbackDeploymentStore) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return nil, nil

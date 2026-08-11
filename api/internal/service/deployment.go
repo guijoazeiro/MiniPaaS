@@ -100,6 +100,21 @@ func (s *DeploymentService) ListByApp(ctx context.Context, appID uuid.UUID, limi
 	return s.deps.ListByApp(ctx, appID, limit)
 }
 
+func (s *DeploymentService) ListAll(ctx context.Context, appName, status string, page, perPage int) (domain.DeploymentPage, error) {
+	items, err := s.deps.ListAll(ctx, appName, status, perPage, (page-1)*perPage)
+	if err != nil {
+		return domain.DeploymentPage{}, fmt.Errorf("service.ListDeployments: %w", err)
+	}
+	total, err := s.deps.CountAll(ctx, appName, status)
+	if err != nil {
+		return domain.DeploymentPage{}, fmt.Errorf("service.CountDeployments: %w", err)
+	}
+	if items == nil {
+		items = []domain.DeploymentListItem{}
+	}
+	return domain.DeploymentPage{Items: items, Page: page, PerPage: perPage, Total: total}, nil
+}
+
 func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader) error {
 	return s.RunBuildWithDockerfile(ctx, dep, app, src, "Dockerfile")
 }

@@ -44,6 +44,8 @@ type DeploymentStore interface {
 	GetActive(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
 	ListRunning(ctx context.Context) ([]domain.Deployment, error)
 	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
+	ListAll(ctx context.Context, appName, status string, limit, offset int) ([]domain.DeploymentListItem, error)
+	CountAll(ctx context.Context, appName, status string) (int64, error)
 	ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error)
 	UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeploymentStatus) error

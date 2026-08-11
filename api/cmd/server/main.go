@@ -122,6 +122,7 @@ func main() {
 	auth.DELETE("/apps/:name", appH.Delete)
 
 	auth.POST("/apps/:name/deployments", depH.Create)
+	auth.GET("/deployments", depH.ListAll)
 	auth.POST("/apps/:name/deployments/git", gitH.Deploy)
 	auth.GET("/apps/:name/deployments", depH.List)
 	auth.GET("/apps/:name/deployments/:id", depH.Get)
