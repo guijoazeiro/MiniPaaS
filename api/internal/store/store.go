@@ -49,6 +49,17 @@ type DeploymentStore interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeploymentStatus) error
 }
 
+type GitDeploymentStore interface {
+	CreateGit(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string) (domain.Deployment, error)
+	UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error
+}
+
+type GitSourceStore interface {
+	Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error)
+	Get(ctx context.Context, appID uuid.UUID) (domain.GitSource, error)
+	Delete(ctx context.Context, appID uuid.UUID) error
+}
+
 type RollbackStore interface {
 	Record(ctx context.Context, appID, fromDep, toDep uuid.UUID, triggeredBy string) error
 }

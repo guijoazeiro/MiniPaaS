@@ -3,6 +3,19 @@ INSERT INTO deployments (app_id, image_tag)
 VALUES (@app_id, @image_tag)
 RETURNING *;
 
+-- name: CreateGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
+VALUES (@app_id, @image_tag, 'git', @repository, @branch)
+RETURNING *;
+
+-- name: UpdateDeploymentGitMetadata :exec
+UPDATE deployments
+SET commit_sha = @commit_sha,
+    commit_author = @commit_author,
+    commit_message = @commit_message,
+    branch = @branch
+WHERE id = @id;
+
 -- name: GetDeploymentByID :one
 SELECT * FROM deployments WHERE id = @id;
 

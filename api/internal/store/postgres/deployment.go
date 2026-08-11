@@ -31,6 +31,29 @@ func (s *DeploymentStore) Create(ctx context.Context, appID uuid.UUID, imageTag 
 	return toDomainDeployment(row), nil
 }
 
+func (s *DeploymentStore) CreateGit(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string) (domain.Deployment, error) {
+	row, err := s.q.CreateGitDeployment(ctx, sqlc.CreateGitDeploymentParams{
+		AppID: uuidToPG(appID), ImageTag: imageTag, Repository: pgtype.Text{String: repository, Valid: true}, Branch: pgtype.Text{String: branch, Valid: true},
+	})
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("store.CreateGitDeployment: %w", err)
+	}
+	return toDomainDeployment(row), nil
+}
+
+func (s *DeploymentStore) UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error {
+	err := s.q.UpdateDeploymentGitMetadata(ctx, sqlc.UpdateDeploymentGitMetadataParams{
+		ID: uuidToPG(id), CommitSha: pgtype.Text{String: commitSHA, Valid: true},
+		CommitAuthor:  pgtype.Text{String: author, Valid: author != ""},
+		CommitMessage: pgtype.Text{String: message, Valid: message != ""},
+		Branch:        pgtype.Text{String: branch, Valid: branch != ""},
+	})
+	if err != nil {
+		return fmt.Errorf("store.UpdateDeploymentGitMetadata: %w", err)
+	}
+	return nil
+}
+
 func (s *DeploymentStore) GetByID(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
 	row, err := s.q.GetDeploymentByID(ctx, uuidToPG(id))
 	if err != nil {
@@ -122,15 +145,20 @@ func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status
 
 func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 	d := domain.Deployment{
-		ID:          pgToUUID(row.ID),
-		AppID:       pgToUUID(row.AppID),
-		ImageTag:    row.ImageTag,
-		Status:      domain.DeploymentStatus(row.Status),
-		ContainerID: pgText(row.ContainerID),
-		Port:        pgInt4(row.Port),
-		CommitSHA:   pgText(row.CommitSha),
-		DurationMs:  pgInt4(row.DurationMs),
-		CreatedAt:   row.CreatedAt.Time,
+		ID:            pgToUUID(row.ID),
+		AppID:         pgToUUID(row.AppID),
+		ImageTag:      row.ImageTag,
+		Status:        domain.DeploymentStatus(row.Status),
+		ContainerID:   pgText(row.ContainerID),
+		Port:          pgInt4(row.Port),
+		CommitSHA:     pgText(row.CommitSha),
+		SourceType:    row.SourceType,
+		Repository:    pgText(row.Repository),
+		Branch:        pgText(row.Branch),
+		CommitAuthor:  pgText(row.CommitAuthor),
+		CommitMessage: pgText(row.CommitMessage),
+		DurationMs:    pgInt4(row.DurationMs),
+		CreatedAt:     row.CreatedAt.Time,
 	}
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time

@@ -17,17 +17,32 @@ type App struct {
 	PublicUrl pgtype.Text        `json:"public_url"`
 }
 
+type AppGitSource struct {
+	AppID          pgtype.UUID        `json:"app_id"`
+	Repository     string             `json:"repository"`
+	Branch         string             `json:"branch"`
+	BuildContext   string             `json:"build_context"`
+	DockerfilePath string             `json:"dockerfile_path"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Deployment struct {
-	ID          pgtype.UUID        `json:"id"`
-	AppID       pgtype.UUID        `json:"app_id"`
-	ImageTag    string             `json:"image_tag"`
-	Status      string             `json:"status"`
-	ContainerID pgtype.Text        `json:"container_id"`
-	Port        pgtype.Int4        `json:"port"`
-	CommitSha   pgtype.Text        `json:"commit_sha"`
-	DurationMs  pgtype.Int4        `json:"duration_ms"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+	ID            pgtype.UUID        `json:"id"`
+	AppID         pgtype.UUID        `json:"app_id"`
+	ImageTag      string             `json:"image_tag"`
+	Status        string             `json:"status"`
+	ContainerID   pgtype.Text        `json:"container_id"`
+	Port          pgtype.Int4        `json:"port"`
+	CommitSha     pgtype.Text        `json:"commit_sha"`
+	DurationMs    pgtype.Int4        `json:"duration_ms"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+	SourceType    string             `json:"source_type"`
+	Repository    pgtype.Text        `json:"repository"`
+	Branch        pgtype.Text        `json:"branch"`
+	CommitAuthor  pgtype.Text        `json:"commit_author"`
+	CommitMessage pgtype.Text        `json:"commit_message"`
 }
 
 type EnvVar struct {

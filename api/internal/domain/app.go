@@ -48,14 +48,29 @@ type EnvVarKey struct {
 }
 
 type Deployment struct {
-	ID          uuid.UUID        `json:"id"`
-	AppID       uuid.UUID        `json:"app_id"`
-	ImageTag    string           `json:"image_tag"`
-	Status      DeploymentStatus `json:"status"`
-	ContainerID string           `json:"container_id,omitempty"`
-	Port        int              `json:"port,omitempty"`
-	CommitSHA   string           `json:"commit_sha,omitempty"`
-	DurationMs  int              `json:"duration_ms,omitempty"`
-	CreatedAt   time.Time        `json:"created_at"`
-	FinishedAt  *time.Time       `json:"finished_at,omitempty"`
+	ID            uuid.UUID        `json:"id"`
+	AppID         uuid.UUID        `json:"app_id"`
+	ImageTag      string           `json:"image_tag"`
+	Status        DeploymentStatus `json:"status"`
+	ContainerID   string           `json:"container_id,omitempty"`
+	Port          int              `json:"port,omitempty"`
+	CommitSHA     string           `json:"commit_sha,omitempty"`
+	SourceType    string           `json:"source_type"`
+	Repository    string           `json:"repository,omitempty"`
+	Branch        string           `json:"branch,omitempty"`
+	CommitAuthor  string           `json:"commit_author,omitempty"`
+	CommitMessage string           `json:"commit_message,omitempty"`
+	DurationMs    int              `json:"duration_ms,omitempty"`
+	CreatedAt     time.Time        `json:"created_at"`
+	FinishedAt    *time.Time       `json:"finished_at,omitempty"`
+}
+
+type GitSource struct {
+	AppID          uuid.UUID `json:"app_id"`
+	Repository     string    `json:"repository"`
+	Branch         string    `json:"branch"`
+	BuildContext   string    `json:"build_context"`
+	DockerfilePath string    `json:"dockerfile_path"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
