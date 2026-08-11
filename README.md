@@ -17,6 +17,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 6 | Health checks | ✅ done |
 | 7 | Dashboard (Next.js) | ✅ done |
 | 8 | Polish, CI, release | ✅ done |
+| 9.1 | Deploy from public GitHub repositories | 🚧 implemented, awaiting manual validation |
 
 ## Stack
 
@@ -298,8 +299,13 @@ GET    /apps/:name                    → App (includes current `container_state
 DELETE /apps/:name                    → 204   (stops container, removes Caddy route, removes row)
 
 POST   /apps/:name/deployments        multipart source=<tar> → 202 Deployment (build runs in background)
+POST   /apps/:name/deployments/git    { branch? } → 202 Deployment (clones the connected public repository)
 GET    /apps/:name/deployments        → []Deployment
 GET    /apps/:name/deployments/:id    → Deployment
+
+PUT    /apps/:name/source/git         { repository, branch?, build_context?, dockerfile_path? } → GitSource
+GET    /apps/:name/source/git         → GitSource
+DELETE /apps/:name/source/git         → 204
 
 GET    /apps/:name/env                → []{ key, updated_at }        (values never returned)
 PUT    /apps/:name/env/:key           { value } → 204                (AES-256-GCM at rest)
@@ -330,7 +336,13 @@ minip login                            # host + username + password → OS user 
 minip apps create <name>
 minip apps list
 minip apps info <name>                 # status + container state + public URL + recent deployments
+minip apps connect-github <name> --repo owner/repository
+minip apps connect-github <name> --repo owner/repository --branch main --context services/api --dockerfile Dockerfile
+minip apps git-source <name>            # connected repository and build settings
+minip apps disconnect-github <name>
 minip deploy [path] --app <name>       # tarball + upload (default path = .)
+minip deploy --git --app <name> --wait # clone and deploy the connected public GitHub repository
+minip deploy --git --app <name> --branch release/v1 --wait
 minip deploy ... --wait                # poll until running or failed
 minip env list <app>                   # keys only, never values
 minip env set <app> KEY=value [KEY=value ...]
@@ -343,6 +355,27 @@ minip rollback <app> --to <id>         # skip the picker
 ```
 
 Host resolution order: `--host` flag → `MINIPAAS_HOST` env → saved config → `http://localhost:8080`.
+
+### Public GitHub deployment contract
+
+Phase 9.1 accepts public repositories hosted on `github.com`. The API stores the canonical `owner/repository` identifier and constructs the clone URL itself; arbitrary Git hosts and URLs are rejected. A `Dockerfile` is required.
+
+- `--context` defaults to `.` and is relative to the repository root.
+- `--dockerfile` defaults to `Dockerfile` and is relative to the selected build context.
+- Absolute paths and path traversal (`..`) are rejected.
+- The clone is shallow and single-branch. Repository metadata (SHA, author, commit message, branch) is recorded on the deployment.
+- Git submodules and Git LFS objects are not fetched in Phase 9.1.
+- Tar uploads remain supported and use the root `Dockerfile` as before.
+
+Example for a monorepo whose application lives in `services/api`:
+
+```powershell
+.\minip.exe apps connect-github hello --repo owner/repository --branch main --context services/api --dockerfile docker/Dockerfile
+.\minip.exe deploy --git --app hello --wait
+.\minip.exe apps info hello
+```
+
+Private repositories are intentionally not part of Phase 9.1. They will use a GitHub App with short-lived installation tokens after this public flow is validated end to end.
 
 ## Project layout
 
@@ -401,6 +434,8 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `IMAGE_RETENTION` | no | `5` | How many recent deployment images to keep per app. Older ones are pruned (best-effort) after each successful deploy — Docker refuses to delete in-use images, so the active one is always safe. |
 | `HEALTH_CHECK_INTERVAL` | no | `30s` | How often running containers are inspected; `exited`, `dead`, and missing containers are marked failed. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
+| `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
+| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a public GitHub clone. The Docker build keeps its existing lifecycle. |
 | `RESTART_POLICY` | no | `on-failure` | Docker restart policy for app containers: `no`, `always`, `on-failure`, or `unless-stopped`. |
 | `RESTART_MAX_RETRIES` | no | `3` | Maximum retries used by Docker's `on-failure` restart policy. |
 | `DASHBOARD_ORIGIN` | no | `http://localhost:3000` | Browser origin allowed to authenticate with the API dashboard cookie. |
