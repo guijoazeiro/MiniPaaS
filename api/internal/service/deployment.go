@@ -22,6 +22,10 @@ type DockerRunner interface {
 	RemoveImage(ctx context.Context, ref string) error
 }
 
+type DockerfileBuilder interface {
+	BuildImageWithDockerfile(ctx context.Context, tar io.Reader, tag, dockerfile string) (io.ReadCloser, error)
+}
+
 type CaddyRouter interface {
 	UpsertRoute(ctx context.Context, appName string, port int) (publicURL string, err error)
 	RemoveRoute(ctx context.Context, appName string) error
@@ -68,6 +72,23 @@ func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.
 	return dep, app, nil
 }
 
+func (s *DeploymentService) CreateGit(ctx context.Context, appName, repository, branch string) (domain.Deployment, domain.App, error) {
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, err
+	}
+	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
+	gitDeps, ok := s.deps.(store.GitDeploymentStore)
+	if !ok {
+		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: git deployment store unavailable")
+	}
+	dep, err := gitDeps.CreateGit(ctx, app.ID, tag, repository, branch)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: %w", err)
+	}
+	return dep, app, nil
+}
+
 func (s *DeploymentService) Get(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
 	return s.deps.GetByID(ctx, id)
 }
@@ -80,13 +101,25 @@ func (s *DeploymentService) ListByApp(ctx context.Context, appID uuid.UUID, limi
 }
 
 func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader) error {
+	return s.RunBuildWithDockerfile(ctx, dep, app, src, "Dockerfile")
+}
+
+func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader, dockerfile string) error {
 	start := time.Now()
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
 	}
 
-	buildLog, err := s.docker.BuildImage(ctx, src, dep.ImageTag)
+	var buildLog io.ReadCloser
+	var err error
+	if dockerfile == "" || dockerfile == "Dockerfile" {
+		buildLog, err = s.docker.BuildImage(ctx, src, dep.ImageTag)
+	} else if builder, ok := s.docker.(DockerfileBuilder); ok {
+		buildLog, err = builder.BuildImageWithDockerfile(ctx, src, dep.ImageTag, dockerfile)
+	} else {
+		err = fmt.Errorf("custom Dockerfile builds are unavailable")
+	}
 	if err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
@@ -98,6 +131,12 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 	}
 	_ = buildLog.Close()
 
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
+	}
+
 	if prev, err := s.deps.GetActive(ctx, app.ID); err == nil && prev.ContainerID != "" {
 		if err := s.docker.StopContainer(ctx, prev.ContainerID); err != nil {
 			s.log.Warn("stop previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
@@ -106,12 +145,6 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 			s.log.Warn("remove previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
 		}
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
-	}
-
-	envVars, err := s.env.Decrypted(ctx, app.ID)
-	if err != nil {
-		s.markFailed(ctx, dep.ID, app.ID)
-		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
 	}
 
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
@@ -152,6 +185,18 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 
 	s.pruneImages(ctx, app.ID)
 	return nil
+}
+
+func (s *DeploymentService) UpdateGitMetadata(ctx context.Context, depID uuid.UUID, sha, author, message, branch string) error {
+	gitDeps, ok := s.deps.(store.GitDeploymentStore)
+	if !ok {
+		return fmt.Errorf("git deployment store unavailable")
+	}
+	return gitDeps.UpdateGitMetadata(ctx, depID, sha, author, message, branch)
+}
+
+func (s *DeploymentService) MarkFailed(ctx context.Context, depID, appID uuid.UUID) {
+	s.markFailed(ctx, depID, appID)
 }
 
 func (s *DeploymentService) Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error) {
@@ -286,7 +331,11 @@ func (s *DeploymentService) markFailed(ctx context.Context, depID, appID uuid.UU
 	if err := s.deps.UpdateStatus(ctx, depID, domain.DeploymentStatusFailed); err != nil {
 		s.log.Error("mark deployment failed", "deployment", depID, "err", err)
 	}
-	if err := s.apps.UpdateStatus(ctx, appID, domain.AppStatusFailed); err != nil {
+	status := domain.AppStatusFailed
+	if _, err := s.deps.GetActive(ctx, appID); err == nil {
+		status = domain.AppStatusRunning
+	}
+	if err := s.apps.UpdateStatus(ctx, appID, status); err != nil {
 		s.log.Error("mark app failed", "app", appID, "err", err)
 	}
 }

@@ -51,7 +51,11 @@ func New(host string) (*Client, error) {
 func (c *Client) Close() error { return c.cli.Close() }
 
 func (c *Client) BuildImage(ctx context.Context, tar io.Reader, tag string) (io.ReadCloser, error) {
-	resp, err := c.cli.ImageBuild(ctx, tar, ImageBuildOptions(tag))
+	return c.BuildImageWithDockerfile(ctx, tar, tag, "Dockerfile")
+}
+
+func (c *Client) BuildImageWithDockerfile(ctx context.Context, tar io.Reader, tag, dockerfile string) (io.ReadCloser, error) {
+	resp, err := c.cli.ImageBuild(ctx, tar, ImageBuildOptions(tag, dockerfile))
 	if err != nil {
 		return nil, fmt.Errorf("docker.BuildImage: %w", err)
 	}

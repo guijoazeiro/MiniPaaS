@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -46,7 +47,10 @@ func (s *rollbackDeploymentStore) UpdateStatus(_ context.Context, _ uuid.UUID, s
 	return nil
 }
 
-type rollbackAppStore struct{ app domain.App }
+type rollbackAppStore struct {
+	app      domain.App
+	statuses []domain.AppStatus
+}
 
 func (s *rollbackAppStore) Create(context.Context, string) (domain.App, error) {
 	return domain.App{}, nil
@@ -54,16 +58,63 @@ func (s *rollbackAppStore) Create(context.Context, string) (domain.App, error) {
 func (s *rollbackAppStore) GetByName(context.Context, string) (domain.App, error)  { return s.app, nil }
 func (s *rollbackAppStore) GetByID(context.Context, uuid.UUID) (domain.App, error) { return s.app, nil }
 func (s *rollbackAppStore) List(context.Context) ([]domain.App, error)             { return nil, nil }
-func (s *rollbackAppStore) UpdateStatus(context.Context, uuid.UUID, domain.AppStatus) error {
+
+func (s *rollbackAppStore) UpdateStatus(_ context.Context, _ uuid.UUID, status domain.AppStatus) error {
+	s.statuses = append(s.statuses, status)
 	return nil
 }
 func (s *rollbackAppStore) UpdatePublicURL(context.Context, uuid.UUID, string) error { return nil }
 func (s *rollbackAppStore) Delete(context.Context, uuid.UUID) error                  { return nil }
 
-type rollbackDocker struct{ mutations int }
+type rollbackDocker struct {
+	mutations int
+	buildErr  error
+}
 
 func (d *rollbackDocker) BuildImage(context.Context, io.Reader, string) (io.ReadCloser, error) {
-	return nil, nil
+	if d.buildErr != nil {
+		return nil, d.buildErr
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func TestFailedBuildKeepsActiveAppRunning(t *testing.T) {
+	appID := uuid.New()
+	deps := &rollbackDeploymentStore{active: domain.Deployment{ID: uuid.New(), AppID: appID, ContainerID: "active", Status: domain.DeploymentStatusRunning}}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app"}}
+	dk := &rollbackDocker{buildErr: errors.New("build failed")}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	err := svc.RunBuild(context.Background(), domain.Deployment{ID: uuid.New(), AppID: appID, ImageTag: "app:new"}, apps.app, strings.NewReader("tar"))
+	if err == nil {
+		t.Fatal("RunBuild() expected error")
+	}
+	if dk.mutations != 0 {
+		t.Fatalf("docker mutations = %d", dk.mutations)
+	}
+	if len(apps.statuses) != 1 || apps.statuses[0] != domain.AppStatusRunning {
+		t.Fatalf("app statuses = %v", apps.statuses)
+	}
+	if got := deps.statuses[len(deps.statuses)-1]; got != domain.DeploymentStatusFailed {
+		t.Fatalf("last deployment status = %s", got)
+	}
+}
+
+func TestDeployResolvesEnvironmentBeforeStoppingActiveContainer(t *testing.T) {
+	appID := uuid.New()
+	deps := &rollbackDeploymentStore{active: domain.Deployment{ID: uuid.New(), AppID: appID, ContainerID: "active", Status: domain.DeploymentStatusRunning}}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app"}}
+	dk := &rollbackDocker{}
+	envErr := errors.New("decrypt failed")
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{err: envErr})
+
+	err := svc.RunBuild(context.Background(), domain.Deployment{ID: uuid.New(), AppID: appID, ImageTag: "app:new"}, apps.app, strings.NewReader("tar"))
+	if !errors.Is(err, envErr) {
+		t.Fatalf("RunBuild() error = %v", err)
+	}
+	if dk.mutations != 0 {
+		t.Fatalf("failed prerequisite caused %d docker mutations", dk.mutations)
+	}
 }
 func (d *rollbackDocker) RunContainer(context.Context, docker.RunOptions) (docker.ContainerInfo, error) {
 	d.mutations++

@@ -20,6 +20,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler/middleware"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/health"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/service"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/sourcegit"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	wspkg "github.com/guijoazeiro/MiniPaaS/api/internal/ws"
@@ -73,11 +74,14 @@ func main() {
 	userStore := postgres.NewUserStore(q)
 	envStore := postgres.NewEnvStore(q)
 	rollbackStore := postgres.NewRollbackStore(q)
+	gitSourceStore := postgres.NewGitSourceStore(q)
 
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
 	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log)
+	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore)
+	gitDepSvc := service.NewGitDeploymentService(gitSourceStore, appStore, depSvc, sourcegit.New(cfg.MaxRepositorySize), cfg.GitCloneTimeout)
 	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
@@ -88,6 +92,7 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize)
+	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
 
@@ -116,9 +121,13 @@ func main() {
 	auth.DELETE("/apps/:name", appH.Delete)
 
 	auth.POST("/apps/:name/deployments", depH.Create)
+	auth.POST("/apps/:name/deployments/git", gitH.Deploy)
 	auth.GET("/apps/:name/deployments", depH.List)
 	auth.GET("/apps/:name/deployments/:id", depH.Get)
 	auth.POST("/apps/:name/rollback", depH.Rollback)
+	auth.PUT("/apps/:name/source/git", gitH.Configure)
+	auth.GET("/apps/:name/source/git", gitH.Get)
+	auth.DELETE("/apps/:name/source/git", gitH.Delete)
 
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)
