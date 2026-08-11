@@ -45,6 +45,8 @@ export default function Home() {
   const [savingGit, setSavingGit] = useState(false);
   const [deployingGit, setDeployingGit] = useState(false);
   const [disconnectingGit, setDisconnectingGit] = useState(false);
+  const [stoppingApp, setStoppingApp] = useState(false);
+  const [stopConfirmationFor, setStopConfirmationFor] = useState("");
 
   const handleApiIssue = useCallback((message: string) => setApiIssue(message), []);
   const {
@@ -58,7 +60,7 @@ export default function Home() {
     refreshApp,
     resetApps,
   } = useApps(authenticated, handleApiIssue);
-  const { logs, outputRef, clearLogs } = useLogStream(authenticated, selectedName);
+  const { logs, outputRef, following, handleScroll, resumeFollowing, clearLogs } = useLogStream(authenticated, selectedName);
 
   useEffect(() => {
     if (!authenticated || !selectedName) {
@@ -220,6 +222,26 @@ export default function Home() {
     }
   }
 
+  async function requestStopApp() {
+    if (!selectedApp) return;
+    if (stopConfirmationFor !== selectedApp.name) {
+      setStopConfirmationFor(selectedApp.name);
+      return;
+    }
+    setStoppingApp(true);
+    setError("");
+    try {
+      await request(`/apps/${encodeURIComponent(selectedApp.name)}/stop`, { method: "POST" });
+      setStopConfirmationFor("");
+      setNotice(`Aplicação ${selectedApp.name} parada.`);
+      await Promise.all([refreshApps(), refreshApp(selectedApp.name)]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível parar a aplicação.");
+    } finally {
+      setStoppingApp(false);
+    }
+  }
+
   async function saveGitSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedApp || !gitRepository.trim()) return;
@@ -363,9 +385,10 @@ export default function Home() {
             setGitBranch("main");
             setGitBuildContext(".");
             setGitDockerfile("Dockerfile");
+            setStopConfirmationFor("");
             setError("");
           }} />
-          <DeployPanel app={selectedApp} deployments={deployments} deployFile={deployFile} deploying={deploying} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => setShowNewApp(true)} />
+          <DeployPanel app={selectedApp} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={stopConfirmationFor === selectedApp?.name} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => setShowNewApp(true)} onRequestStop={requestStopApp} onCancelStop={() => setStopConfirmationFor("")} />
         </section>
 
         {selectedApp && (
@@ -388,7 +411,7 @@ export default function Home() {
               onDeploy={deployGit}
               onDisconnect={disconnectGit}
             />
-            <LogViewer logs={logs} outputRef={outputRef} />
+            <LogViewer logs={logs} outputRef={outputRef} following={following} onScroll={handleScroll} onResume={resumeFollowing} />
             <EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} />
           </section>
         )}

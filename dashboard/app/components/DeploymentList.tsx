@@ -22,8 +22,8 @@ export function DeploymentList({ deployments, rollingBackID, onRollback }: Props
               <small>{formatTime(deployment.created_at)} · {formatDuration(deployment.duration_ms)}{deployment.port ? ` · porta ${deployment.port}` : ""}</small>
             </div>
             <span className={`status-pill compact ${deployment.status}`}><i />{stateLabel(deployment.status)}</span>
-            {["superseded", "rolled_back"].includes(deployment.status) && (
-              <button className="text-button" onClick={() => onRollback(deployment.id)} disabled={Boolean(rollingBackID)}>{rollingBackID === deployment.id ? "Revertendo…" : "Rollback"}</button>
+            {["superseded", "rolled_back", "stopped"].includes(deployment.status) && (
+              <button className="text-button" onClick={() => onRollback(deployment.id)} disabled={Boolean(rollingBackID)}>{rollingBackID === deployment.id ? "Revertendo…" : deployment.status === "stopped" ? "Reativar" : "Rollback"}</button>
             )}
           </article>
         ))}

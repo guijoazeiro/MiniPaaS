@@ -42,7 +42,10 @@ test("keeps product behavior and style after the dashboard split", async () => {
   assert.match(logStream, /\/logs\?follow=true/);
   assert.match(landing, /function Landing/);
   assert.match(login, /Mostrar senha/);
-  assert.match(deploymentList, /\["superseded", "rolled_back"\]/);
+  assert.match(deploymentList, /\["superseded", "rolled_back", "stopped"\]/);
+  assert.match(page, /\/apps\/.*\/stop/);
+  assert.match(logStream, /followingRef/);
+  assert.match(logStream, /scrollHeight - output\.scrollTop - output\.clientHeight/);
   assert.match(layout, /MiniPaaS .* Control Plane/);
   assert.match(layout, /og\.png/);
   assert.match(css, /backdrop-filter/);

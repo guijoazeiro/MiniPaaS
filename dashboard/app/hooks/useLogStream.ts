@@ -1,14 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import { websocketUrl } from "../lib/api";
 
 export function useLogStream(authenticated: boolean, selectedName: string) {
   const [logs, setLogs] = useState<string[]>([]);
   const outputRef = useRef<HTMLPreElement>(null);
+  const followingRef = useRef(true);
+  const [following, setFollowing] = useState(true);
 
   useEffect(() => {
     if (!authenticated || !selectedName) return;
 
-    const clearTimer = window.setTimeout(() => setLogs([]), 0);
+    const clearTimer = window.setTimeout(() => {
+      setLogs([]);
+      followingRef.current = true;
+      setFollowing(true);
+    }, 0);
     let socket: WebSocket | null = null;
     let retryTimer: number | undefined;
     let disposed = false;
@@ -33,9 +39,23 @@ export function useLogStream(authenticated: boolean, selectedName: string) {
 
   useEffect(() => {
     const output = outputRef.current;
-    if (output) output.scrollTop = output.scrollHeight;
+    if (output && followingRef.current) output.scrollTop = output.scrollHeight;
   }, [logs]);
 
+  const handleScroll = useCallback((event: UIEvent<HTMLPreElement>) => {
+    const output = event.currentTarget;
+    const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight <= 24;
+    followingRef.current = atBottom;
+    setFollowing(atBottom);
+  }, []);
+
+  const resumeFollowing = useCallback(() => {
+    followingRef.current = true;
+    setFollowing(true);
+    const output = outputRef.current;
+    if (output) output.scrollTop = output.scrollHeight;
+  }, []);
+
   const clearLogs = () => setLogs([]);
-  return { logs, outputRef, clearLogs };
+  return { logs, outputRef, following, handleScroll, resumeFollowing, clearLogs };
 }

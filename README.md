@@ -297,6 +297,7 @@ POST   /apps                          { name } → App
 GET    /apps                          → []App
 GET    /apps/:name                    → App (includes current `container_state` when deployed)
 DELETE /apps/:name                    → 204   (stops container, removes Caddy route, removes row)
+POST   /apps/:name/stop               → 204   (stops runtime and route; preserves app configuration and history)
 
 POST   /apps/:name/deployments        multipart source=<tar> → 202 Deployment (build runs in background)
 POST   /apps/:name/deployments/git    { branch? } → 202 Deployment (clones the connected public repository)
@@ -327,7 +328,10 @@ pending → building → running    (happy path)
 running           → superseded  (replaced by a newer deploy)
                   → rolled_back (intentional rollback — phase 5)
                   → failed      (container exited, dead, or missing — health check)
+                  → stopped     (manually stopped; application data is preserved)
 ```
+
+A stopped deployment can be started again from the dashboard with **Reativar**, which reuses the retained image through the rollback path.
 
 ## CLI
 

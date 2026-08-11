@@ -3,7 +3,7 @@ export type Theme = "light" | "dark";
 export type App = {
   id: string;
   name: string;
-  status: "idle" | "running" | "failed";
+  status: "idle" | "running" | "failed" | "stopped";
   container_state?: string;
   public_url?: string;
   created_at: string;
@@ -13,7 +13,7 @@ export type App = {
 export type Deployment = {
   id: string;
   image_tag: string;
-  status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back";
+  status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back" | "stopped";
   port?: number;
   duration_ms?: number;
   created_at: string;

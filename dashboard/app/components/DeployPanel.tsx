@@ -7,19 +7,37 @@ type Props = {
   deployments: Deployment[];
   deployFile: File | null;
   deploying: boolean;
+  stopping: boolean;
+  confirmingStop: boolean;
   onFileChange: (file: File | null) => void;
   onDeploy: (event: FormEvent<HTMLFormElement>) => void;
   onCreate: () => void;
+  onRequestStop: () => void;
+  onCancelStop: () => void;
 };
 
-export function DeployPanel({ app, deployments, deployFile, deploying, onFileChange, onDeploy, onCreate }: Props) {
+export function DeployPanel({ app, deployments, deployFile, deploying, stopping, confirmingStop, onFileChange, onDeploy, onCreate, onRequestStop, onCancelStop }: Props) {
   if (!app) {
     return <div className="command-panel"><div className="empty-state"><p className="eyebrow">SEM APLICAÇÃO</p><h2>Comece sua plataforma.</h2><p>Crie uma aplicação e envie o primeiro deploy.</p><button className="button primary" onClick={onCreate}>Criar aplicação</button></div></div>;
   }
 
+  const canStop = app.status === "running" || ["running", "restarting", "created"].includes(app.container_state || "");
+
   return (
     <div className="command-panel">
-      <div className="selected-header"><div><p className="eyebrow">APLICAÇÃO ATIVA</p><h2>{app.name}</h2></div><span className={`status-pill ${app.status}`}><i />{stateLabel(app.status)}</span></div>
+      <div className="selected-header">
+        <div><p className="eyebrow">APLICAÇÃO ATIVA</p><h2>{app.name}</h2></div>
+        <div className="selected-actions">
+          <span className={`status-pill ${app.status}`}><i />{stateLabel(app.status)}</span>
+          {canStop && (confirmingStop ? (
+            <span className="stop-confirmation">
+              <span>Parar agora?</span>
+              <button className="button danger" disabled={stopping} onClick={onRequestStop}>{stopping ? "Parando…" : "Confirmar"}</button>
+              <button className="text-button" disabled={stopping} onClick={onCancelStop}>Cancelar</button>
+            </span>
+          ) : <button className="button danger subtle" onClick={onRequestStop}>Parar aplicação</button>)}
+        </div>
+      </div>
       <div className="stats-row">
         <div><span>Status do container</span><strong>{app.container_state || "não iniciado"}</strong></div>
         <div><span>Último deploy</span><strong>{deployments[0] ? formatTime(deployments[0].created_at) : "nenhum"}</strong></div>

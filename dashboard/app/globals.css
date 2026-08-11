@@ -28,6 +28,18 @@
 .log-output::-webkit-scrollbar-thumb:hover { background: var(--violet-ink); }
 .log-output::-webkit-scrollbar-corner { background: #050505; }
 
+.selected-actions { display: flex; align-items: center; gap: 9px; }
+.button.danger { border-color: var(--bad); background: var(--bad); color: #fff; }
+.button.danger.subtle { min-height: 34px; border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); background: transparent; color: var(--bad); font-size: 11px; }
+.stop-confirmation { display: flex; align-items: center; gap: 7px; padding-left: 9px; border-left: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.stop-confirmation .button { min-height: 32px; padding: 0 10px; font-size: 11px; }
+.status-pill.stopped, .status-dot.stopped { color: var(--muted); }
+.status-dot.stopped { background: var(--muted); }
+.log-frame { position: relative; }
+.live.paused { color: var(--warning); }
+.log-resume { position: absolute; right: 14px; bottom: 13px; min-height: 32px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--violet) 55%, var(--line)); border-radius: 7px; background: #111; color: var(--violet-ink); box-shadow: 0 8px 24px rgba(0,0,0,.28); font: 700 10px var(--font-geist-mono), monospace; }
+.log-resume:hover { border-color: var(--violet); color: var(--violet); }
+
 .git-panel { grid-column: 1 / -1; }
 .connection-state { padding: 6px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 11px; }
 .connection-state.connected { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
@@ -49,4 +61,6 @@
   .git-repository-field { grid-column: auto; }
   .git-source-actions { align-items: stretch; flex-direction: column; }
   .text-button.danger { margin-left: 0; }
+  .selected-actions, .stop-confirmation { align-items: flex-end; flex-direction: column; }
+  .stop-confirmation { padding: 8px 0 0; border-top: 1px solid var(--line); border-left: 0; }
 }
