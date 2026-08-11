@@ -44,7 +44,7 @@ func (h *EnvHandler) List(c *gin.Context) {
 }
 
 type setEnvReq struct {
-	Value string `json:"value"`
+	Value *string `json:"value" binding:"required"`
 }
 
 func (h *EnvHandler) Set(c *gin.Context) {
@@ -58,7 +58,7 @@ func (h *EnvHandler) Set(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	if err := h.svc.Set(c.Request.Context(), app.ID, c.Param("key"), req.Value); err != nil {
+	if err := h.svc.Set(c.Request.Context(), app.ID, c.Param("key"), *req.Value); err != nil {
 		respondError(c, h.log, err)
 		return
 	}

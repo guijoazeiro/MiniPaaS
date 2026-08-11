@@ -117,12 +117,12 @@ func TestParseTokenRoundtrip(t *testing.T) {
 	}
 }
 
-func TestParseTokenRejectsTampered(t *testing.T) {
+func TestParseTokenRejectsDifferentSigningKey(t *testing.T) {
 	svc, _ := newAuthSvc(t)
 	tok, _, _ := svc.Login(context.Background(), "alice", "hunter2")
-	bad := tok[:len(tok)-2] + "aa"
-	if _, _, err := svc.ParseToken(bad); err == nil {
-		t.Fatal("expected error on tampered token")
+	otherSvc := NewAuthService(&fakeUserStore{}, []byte("different-secret"), time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, _, err := otherSvc.ParseToken(tok); err == nil {
+		t.Fatal("expected error parsing token signed with a different key")
 	}
 }
 

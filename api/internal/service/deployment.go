@@ -171,6 +171,16 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if target.ImageTag == "" {
 		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
 	}
+	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
+		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
+	}
+
+	// Resolve every fallible prerequisite before touching the active container.
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: decrypt env: %w", err)
+	}
+
 	var fromID uuid.UUID
 	current, err := s.deps.GetActive(ctx, app.ID)
 	if err == nil {
@@ -192,15 +202,6 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	} else if !errors.Is(err, domain.ErrDeploymentNotFound) {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: get active deployment: %w", err)
 	}
-	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
-		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
-	}
-
-	envVars, err := s.env.Decrypted(ctx, app.ID)
-	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("service.Rollback: decrypt env: %w", err)
-	}
-
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image:             target.ImageTag,
 		Name:              fmt.Sprintf("minipaas-%s", app.Name),

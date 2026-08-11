@@ -27,18 +27,25 @@ type AppLookup interface {
 }
 
 type DeploymentHandler struct {
-	svc  DeploymentService
-	apps AppLookup
-	log  *slog.Logger
+	svc           DeploymentService
+	apps          AppLookup
+	log           *slog.Logger
+	maxDeploySize int64
 }
 
-func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger) *DeploymentHandler {
-	return &DeploymentHandler{svc: svc, apps: apps, log: log}
+func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger, maxDeploySize int64) *DeploymentHandler {
+	return &DeploymentHandler{svc: svc, apps: apps, log: log, maxDeploySize: maxDeploySize}
 }
 
 func (h *DeploymentHandler) Create(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxDeploySize)
 	file, _, err := c.Request.FormFile("source")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "deployment source exceeds the configured size limit"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart field 'source' required"})
 		return
 	}
