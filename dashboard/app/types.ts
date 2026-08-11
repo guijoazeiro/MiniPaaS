@@ -12,6 +12,8 @@ export type App = {
 
 export type Deployment = {
   id: string;
+  app_id: string;
+  app_name?: string;
   image_tag: string;
   status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back" | "stopped";
   port?: number;
@@ -23,6 +25,13 @@ export type Deployment = {
   commit_sha?: string;
   commit_author?: string;
   commit_message?: string;
+};
+
+export type DeploymentPage = {
+  items: Deployment[];
+  page: number;
+  per_page: number;
+  total: number;
 };
 
 export type GitSource = {
