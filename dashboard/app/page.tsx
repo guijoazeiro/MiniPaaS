@@ -12,7 +12,8 @@ import { DeploymentList } from "./components/DeploymentList";
 import { LogViewer } from "./components/LogViewer";
 import { EnvPanel } from "./components/EnvPanel";
 import { NewAppModal } from "./components/NewAppModal";
-import type { App, Deployment, Theme } from "./types";
+import { GitDeployPanel } from "./components/GitDeployPanel";
+import type { App, Deployment, GitSource, Theme } from "./types";
 
 export default function Home() {
   const [theme, setTheme] = useState<Theme>("dark");
@@ -36,6 +37,14 @@ export default function Home() {
   const [rollingBackID, setRollingBackID] = useState("");
   const [savingEnv, setSavingEnv] = useState(false);
   const [deletingEnvKey, setDeletingEnvKey] = useState("");
+  const [gitSource, setGitSource] = useState<GitSource | null>(null);
+  const [gitRepository, setGitRepository] = useState("");
+  const [gitBranch, setGitBranch] = useState("main");
+  const [gitBuildContext, setGitBuildContext] = useState(".");
+  const [gitDockerfile, setGitDockerfile] = useState("Dockerfile");
+  const [savingGit, setSavingGit] = useState(false);
+  const [deployingGit, setDeployingGit] = useState(false);
+  const [disconnectingGit, setDisconnectingGit] = useState(false);
 
   const handleApiIssue = useCallback((message: string) => setApiIssue(message), []);
   const {
@@ -50,6 +59,35 @@ export default function Home() {
     resetApps,
   } = useApps(authenticated, handleApiIssue);
   const { logs, outputRef, clearLogs } = useLogStream(authenticated, selectedName);
+
+  useEffect(() => {
+    if (!authenticated || !selectedName) {
+      return;
+    }
+    let active = true;
+    request<GitSource>(`/apps/${encodeURIComponent(selectedName)}/source/git`)
+      .then((source) => {
+        if (!active) return;
+        setGitSource(source);
+        setGitRepository(source.repository);
+        setGitBranch(source.branch);
+        setGitBuildContext(source.build_context);
+        setGitDockerfile(source.dockerfile_path);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        if (cause instanceof ApiError && cause.status === 404) {
+          setGitSource(null);
+          setGitRepository("");
+          setGitBranch("main");
+          setGitBuildContext(".");
+          setGitDockerfile("Dockerfile");
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : "Não foi possível carregar a origem Git.");
+      });
+    return () => { active = false; };
+  }, [authenticated, selectedName]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -182,6 +220,68 @@ export default function Home() {
     }
   }
 
+  async function saveGitSource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedApp || !gitRepository.trim()) return;
+    setSavingGit(true);
+    setError("");
+    try {
+      const source = await request<GitSource>(`/apps/${encodeURIComponent(selectedApp.name)}/source/git`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repository: gitRepository.trim(), branch: gitBranch, build_context: gitBuildContext, dockerfile_path: gitDockerfile }),
+      });
+      setGitSource(source);
+      setGitRepository(source.repository);
+      setGitBranch(source.branch);
+      setGitBuildContext(source.build_context);
+      setGitDockerfile(source.dockerfile_path);
+      setNotice(`Repositório ${source.repository} conectado.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível conectar o repositório.");
+    } finally {
+      setSavingGit(false);
+    }
+  }
+
+  async function deployGit() {
+    if (!selectedApp || !gitSource) return;
+    setDeployingGit(true);
+    setError("");
+    try {
+      await request<Deployment>(`/apps/${encodeURIComponent(selectedApp.name)}/deployments/git`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: gitBranch }),
+      });
+      setNotice("Deploy Git iniciado. Acompanhe o status e os logs.");
+      await refreshApp(selectedApp.name);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar o deploy Git.");
+    } finally {
+      setDeployingGit(false);
+    }
+  }
+
+  async function disconnectGit() {
+    if (!selectedApp || !gitSource) return;
+    setDisconnectingGit(true);
+    setError("");
+    try {
+      await request(`/apps/${encodeURIComponent(selectedApp.name)}/source/git`, { method: "DELETE" });
+      setGitSource(null);
+      setGitRepository("");
+      setGitBranch("main");
+      setGitBuildContext(".");
+      setGitDockerfile("Dockerfile");
+      setNotice("Repositório desconectado.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível desconectar o repositório.");
+    } finally {
+      setDisconnectingGit(false);
+    }
+  }
+
   async function saveEnv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedApp || !envName.trim()) return;
@@ -256,13 +356,38 @@ export default function Home() {
         )}
 
         <section id="overview" className="overview-grid">
-          <AppList apps={apps} selectedName={selectedName} onSelect={(name) => { setSelectedName(name); setError(""); }} />
+          <AppList apps={apps} selectedName={selectedName} onSelect={(name) => {
+            setSelectedName(name);
+            setGitSource(null);
+            setGitRepository("");
+            setGitBranch("main");
+            setGitBuildContext(".");
+            setGitDockerfile("Dockerfile");
+            setError("");
+          }} />
           <DeployPanel app={selectedApp} deployments={deployments} deployFile={deployFile} deploying={deploying} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => setShowNewApp(true)} />
         </section>
 
         {selectedApp && (
           <section className="operations-grid">
             <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} />
+            <GitDeployPanel
+              source={gitSource}
+              repository={gitRepository}
+              branch={gitBranch}
+              buildContext={gitBuildContext}
+              dockerfilePath={gitDockerfile}
+              saving={savingGit}
+              deploying={deployingGit}
+              disconnecting={disconnectingGit}
+              onRepositoryChange={setGitRepository}
+              onBranchChange={setGitBranch}
+              onBuildContextChange={setGitBuildContext}
+              onDockerfilePathChange={setGitDockerfile}
+              onSave={saveGitSource}
+              onDeploy={deployGit}
+              onDisconnect={disconnectGit}
+            />
             <LogViewer logs={logs} outputRef={outputRef} />
             <EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} />
           </section>

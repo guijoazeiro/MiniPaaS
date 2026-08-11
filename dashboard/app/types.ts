@@ -17,6 +17,20 @@ export type Deployment = {
   port?: number;
   duration_ms?: number;
   created_at: string;
+  source_type?: "upload" | "git";
+  repository?: string;
+  branch?: string;
+  commit_sha?: string;
+  commit_author?: string;
+  commit_message?: string;
+};
+
+export type GitSource = {
+  app_id: string;
+  repository: string;
+  branch: string;
+  build_context: string;
+  dockerfile_path: string;
 };
 
 export type EnvKey = {

@@ -27,3 +27,26 @@
 .log-output::-webkit-scrollbar-thumb { min-height: 34px; border: 2px solid #050505; border-radius: 99px; background: var(--violet); }
 .log-output::-webkit-scrollbar-thumb:hover { background: var(--violet-ink); }
 .log-output::-webkit-scrollbar-corner { background: #050505; }
+
+.git-panel { grid-column: 1 / -1; }
+.connection-state { padding: 6px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 11px; }
+.connection-state.connected { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.git-source-form { display: grid; grid-template-columns: 1.4fr .7fr .7fr .7fr; gap: 10px; margin-top: 18px; }
+.git-source-form input { min-width: 0; font: 11px var(--font-geist-mono), monospace; }
+.git-source-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+.text-button.danger { margin-left: auto; color: var(--bad); }
+.git-help { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.deployment-source { color: var(--violet-ink) !important; }
+.commit-message { overflow: hidden; max-width: 370px; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 960px) {
+  .git-source-form { grid-template-columns: 1fr 1fr; }
+  .git-repository-field { grid-column: 1 / -1; }
+}
+
+@media (max-width: 640px) {
+  .git-source-form { grid-template-columns: 1fr; }
+  .git-repository-field { grid-column: auto; }
+  .git-source-actions { align-items: stretch; flex-direction: column; }
+  .text-button.danger { margin-left: 0; }
+}

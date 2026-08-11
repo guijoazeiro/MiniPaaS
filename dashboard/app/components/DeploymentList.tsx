@@ -16,7 +16,9 @@ export function DeploymentList({ deployments, rollingBackID, onRollback }: Props
           <article className="deployment-row" key={deployment.id}>
             <span className={`status-dot ${deployment.status}`} />
             <div>
-              <strong>{deployment.image_tag || deployment.id.slice(0, 8)}</strong>
+              <strong>{deployment.source_type === "git" && deployment.commit_sha ? deployment.commit_sha.slice(0, 8) : deployment.image_tag || deployment.id.slice(0, 8)}</strong>
+              {deployment.repository && <small className="deployment-source">{deployment.repository}@{deployment.branch || "main"}{deployment.commit_author ? ` · ${deployment.commit_author}` : ""}</small>}
+              {deployment.commit_message && <small className="commit-message">{deployment.commit_message.split("\n")[0]}</small>}
               <small>{formatTime(deployment.created_at)} · {formatDuration(deployment.duration_ms)}{deployment.port ? ` · porta ${deployment.port}` : ""}</small>
             </div>
             <span className={`status-pill compact ${deployment.status}`}><i />{stateLabel(deployment.status)}</span>
