@@ -31,6 +31,29 @@ func (s *DeploymentStore) Create(ctx context.Context, appID uuid.UUID, imageTag 
 	return toDomainDeployment(row), nil
 }
 
+func (s *DeploymentStore) CreateGit(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string) (domain.Deployment, error) {
+	row, err := s.q.CreateGitDeployment(ctx, sqlc.CreateGitDeploymentParams{
+		AppID: uuidToPG(appID), ImageTag: imageTag, Repository: pgtype.Text{String: repository, Valid: true}, Branch: pgtype.Text{String: branch, Valid: true},
+	})
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("store.CreateGitDeployment: %w", err)
+	}
+	return toDomainDeployment(row), nil
+}
+
+func (s *DeploymentStore) UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error {
+	err := s.q.UpdateDeploymentGitMetadata(ctx, sqlc.UpdateDeploymentGitMetadataParams{
+		ID: uuidToPG(id), CommitSha: pgtype.Text{String: commitSHA, Valid: true},
+		CommitAuthor:  pgtype.Text{String: author, Valid: author != ""},
+		CommitMessage: pgtype.Text{String: message, Valid: message != ""},
+		Branch:        pgtype.Text{String: branch, Valid: branch != ""},
+	})
+	if err != nil {
+		return fmt.Errorf("store.UpdateDeploymentGitMetadata: %w", err)
+	}
+	return nil
+}
+
 func (s *DeploymentStore) GetByID(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
 	row, err := s.q.GetDeploymentByID(ctx, uuidToPG(id))
 	if err != nil {
@@ -80,6 +103,41 @@ func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit 
 	return out, nil
 }
 
+func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, limit, offset int) ([]domain.DeploymentListItem, error) {
+	rows, err := s.q.ListDeployments(ctx, sqlc.ListDeploymentsParams{
+		AppName: pgtype.Text{String: appName, Valid: appName != ""},
+		Status:  pgtype.Text{String: status, Valid: status != ""},
+		Lim:     int32(limit),
+		Off:     int32(offset),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListDeployments: %w", err)
+	}
+	out := make([]domain.DeploymentListItem, len(rows))
+	for i, row := range rows {
+		deployment := toDomainDeployment(sqlc.Deployment{
+			ID: row.ID, AppID: row.AppID, ImageTag: row.ImageTag, Status: row.Status,
+			ContainerID: row.ContainerID, Port: row.Port, CommitSha: row.CommitSha,
+			DurationMs: row.DurationMs, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
+			SourceType: row.SourceType, Repository: row.Repository, Branch: row.Branch,
+			CommitAuthor: row.CommitAuthor, CommitMessage: row.CommitMessage,
+		})
+		out[i] = domain.DeploymentListItem{Deployment: deployment, AppName: row.AppName}
+	}
+	return out, nil
+}
+
+func (s *DeploymentStore) CountAll(ctx context.Context, appName, status string) (int64, error) {
+	total, err := s.q.CountDeployments(ctx, sqlc.CountDeploymentsParams{
+		AppName: pgtype.Text{String: appName, Valid: appName != ""},
+		Status:  pgtype.Text{String: status, Valid: status != ""},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("store.CountDeployments: %w", err)
+	}
+	return total, nil
+}
+
 func (s *DeploymentStore) ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error) {
 	rows, err := s.q.ListDeploymentsForRetention(ctx, sqlc.ListDeploymentsForRetentionParams{
 		AppID: uuidToPG(appID),
@@ -122,15 +180,20 @@ func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status
 
 func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 	d := domain.Deployment{
-		ID:          pgToUUID(row.ID),
-		AppID:       pgToUUID(row.AppID),
-		ImageTag:    row.ImageTag,
-		Status:      domain.DeploymentStatus(row.Status),
-		ContainerID: pgText(row.ContainerID),
-		Port:        pgInt4(row.Port),
-		CommitSHA:   pgText(row.CommitSha),
-		DurationMs:  pgInt4(row.DurationMs),
-		CreatedAt:   row.CreatedAt.Time,
+		ID:            pgToUUID(row.ID),
+		AppID:         pgToUUID(row.AppID),
+		ImageTag:      row.ImageTag,
+		Status:        domain.DeploymentStatus(row.Status),
+		ContainerID:   pgText(row.ContainerID),
+		Port:          pgInt4(row.Port),
+		CommitSHA:     pgText(row.CommitSha),
+		SourceType:    row.SourceType,
+		Repository:    pgText(row.Repository),
+		Branch:        pgText(row.Branch),
+		CommitAuthor:  pgText(row.CommitAuthor),
+		CommitMessage: pgText(row.CommitMessage),
+		DurationMs:    pgInt4(row.DurationMs),
+		CreatedAt:     row.CreatedAt.Time,
 	}
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time

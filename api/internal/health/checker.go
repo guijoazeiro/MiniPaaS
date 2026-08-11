@@ -77,6 +77,9 @@ func (c *Checker) ContainerState(ctx context.Context, appID uuid.UUID) (string, 
 			return "", fmt.Errorf("health.ContainerState: list deployments: %w", listErr)
 		}
 		for _, candidate := range deployments {
+			if candidate.Status == domain.DeploymentStatusStopped {
+				return "stopped", nil
+			}
 			if candidate.ContainerID != "" {
 				dep = candidate
 				break

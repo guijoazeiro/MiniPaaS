@@ -99,3 +99,16 @@ func (h *AppHandler) Delete(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+func (h *AppHandler) Stop(c *gin.Context) {
+	app, err := h.svc.GetByName(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	if err := h.stopper.StopApp(c.Request.Context(), app); err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

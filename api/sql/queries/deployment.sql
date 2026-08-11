@@ -3,6 +3,19 @@ INSERT INTO deployments (app_id, image_tag)
 VALUES (@app_id, @image_tag)
 RETURNING *;
 
+-- name: CreateGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
+VALUES (@app_id, @image_tag, 'git', @repository, @branch)
+RETURNING *;
+
+-- name: UpdateDeploymentGitMetadata :exec
+UPDATE deployments
+SET commit_sha = @commit_sha,
+    commit_author = @commit_author,
+    commit_message = @commit_message,
+    branch = @branch
+WHERE id = @id;
+
 -- name: GetDeploymentByID :one
 SELECT * FROM deployments WHERE id = @id;
 
@@ -17,6 +30,22 @@ SELECT * FROM deployments
 WHERE app_id = @app_id
 ORDER BY created_at DESC
 LIMIT @lim;
+
+-- name: ListDeployments :many
+SELECT d.*, a.name AS app_name
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE (sqlc.narg('app_name')::text IS NULL OR a.name = sqlc.narg('app_name'))
+  AND (sqlc.narg('status')::text IS NULL OR d.status = sqlc.narg('status'))
+ORDER BY d.created_at DESC
+LIMIT @lim OFFSET @off;
+
+-- name: CountDeployments :one
+SELECT COUNT(*)
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE (sqlc.narg('app_name')::text IS NULL OR a.name = sqlc.narg('app_name'))
+  AND (sqlc.narg('status')::text IS NULL OR d.status = sqlc.narg('status'));
 
 -- name: UpdateDeploymentRunning :exec
 UPDATE deployments

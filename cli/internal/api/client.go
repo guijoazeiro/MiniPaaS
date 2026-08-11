@@ -35,13 +35,27 @@ type App struct {
 }
 
 type Deployment struct {
-	ID         string `json:"id"`
-	AppID      string `json:"app_id"`
-	ImageTag   string `json:"image_tag"`
-	Status     string `json:"status"`
-	Port       int    `json:"port,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-	DurationMs int    `json:"duration_ms,omitempty"`
+	ID            string `json:"id"`
+	AppID         string `json:"app_id"`
+	ImageTag      string `json:"image_tag"`
+	Status        string `json:"status"`
+	Port          int    `json:"port,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	DurationMs    int    `json:"duration_ms,omitempty"`
+	SourceType    string `json:"source_type,omitempty"`
+	Repository    string `json:"repository,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	CommitSHA     string `json:"commit_sha,omitempty"`
+	CommitAuthor  string `json:"commit_author,omitempty"`
+	CommitMessage string `json:"commit_message,omitempty"`
+}
+
+type GitSource struct {
+	AppID          string `json:"app_id"`
+	Repository     string `json:"repository"`
+	Branch         string `json:"branch"`
+	BuildContext   string `json:"build_context"`
+	DockerfilePath string `json:"dockerfile_path"`
 }
 
 func (c *Client) ListDeployments(app string) ([]Deployment, error) {
@@ -113,6 +127,36 @@ func (c *Client) Deploy(app string, tar io.Reader) (*Deployment, error) {
 	var out Deployment
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *Client) ConfigureGitSource(app string, source GitSource) (*GitSource, error) {
+	body, _ := json.Marshal(source)
+	var out GitSource
+	if err := c.doJSON(http.MethodPut, "/apps/"+app+"/source/git", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetGitSource(app string) (*GitSource, error) {
+	var out GitSource
+	if err := c.doJSON(http.MethodGet, "/apps/"+app+"/source/git", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteGitSource(app string) error {
+	return c.doJSON(http.MethodDelete, "/apps/"+app+"/source/git", nil, "", nil)
+}
+
+func (c *Client) DeployGit(app, branch string) (*Deployment, error) {
+	body, _ := json.Marshal(map[string]string{"branch": branch})
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/git", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
 	}
 	return &out, nil
 }

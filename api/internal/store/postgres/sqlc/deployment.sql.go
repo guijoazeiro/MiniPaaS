@@ -11,10 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDeployments = `-- name: CountDeployments :one
+SELECT COUNT(*)
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE ($1::text IS NULL OR a.name = $1)
+  AND ($2::text IS NULL OR d.status = $2)
+`
+
+type CountDeploymentsParams struct {
+	AppName pgtype.Text `json:"app_name"`
+	Status  pgtype.Text `json:"status"`
+}
+
+func (q *Queries) CountDeployments(ctx context.Context, arg CountDeploymentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeployments, arg.AppName, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createDeployment = `-- name: CreateDeployment :one
 INSERT INTO deployments (app_id, image_tag)
 VALUES ($1, $2)
-RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at
+RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message
 `
 
 type CreateDeploymentParams struct {
@@ -36,12 +56,58 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 		&i.DurationMs,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.SourceType,
+		&i.Repository,
+		&i.Branch,
+		&i.CommitAuthor,
+		&i.CommitMessage,
+	)
+	return i, err
+}
+
+const createGitDeployment = `-- name: CreateGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
+VALUES ($1, $2, 'git', $3, $4)
+RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message
+`
+
+type CreateGitDeploymentParams struct {
+	AppID      pgtype.UUID `json:"app_id"`
+	ImageTag   string      `json:"image_tag"`
+	Repository pgtype.Text `json:"repository"`
+	Branch     pgtype.Text `json:"branch"`
+}
+
+func (q *Queries) CreateGitDeployment(ctx context.Context, arg CreateGitDeploymentParams) (Deployment, error) {
+	row := q.db.QueryRow(ctx, createGitDeployment,
+		arg.AppID,
+		arg.ImageTag,
+		arg.Repository,
+		arg.Branch,
+	)
+	var i Deployment
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.ImageTag,
+		&i.Status,
+		&i.ContainerID,
+		&i.Port,
+		&i.CommitSha,
+		&i.DurationMs,
+		&i.CreatedAt,
+		&i.FinishedAt,
+		&i.SourceType,
+		&i.Repository,
+		&i.Branch,
+		&i.CommitAuthor,
+		&i.CommitMessage,
 	)
 	return i, err
 }
 
 const getActiveDeployment = `-- name: GetActiveDeployment :one
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
 WHERE app_id = $1 AND status = 'running'
 ORDER BY created_at DESC
 LIMIT 1
@@ -61,12 +127,17 @@ func (q *Queries) GetActiveDeployment(ctx context.Context, appID pgtype.UUID) (D
 		&i.DurationMs,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.SourceType,
+		&i.Repository,
+		&i.Branch,
+		&i.CommitAuthor,
+		&i.CommitMessage,
 	)
 	return i, err
 }
 
 const getDeploymentByID = `-- name: GetDeploymentByID :one
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments WHERE id = $1
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments WHERE id = $1
 `
 
 func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deployment, error) {
@@ -83,12 +154,95 @@ func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deploy
 		&i.DurationMs,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.SourceType,
+		&i.Repository,
+		&i.Branch,
+		&i.CommitAuthor,
+		&i.CommitMessage,
 	)
 	return i, err
 }
 
+const listDeployments = `-- name: ListDeployments :many
+SELECT d.id, d.app_id, d.image_tag, d.status, d.container_id, d.port, d.commit_sha, d.duration_ms, d.created_at, d.finished_at, d.source_type, d.repository, d.branch, d.commit_author, d.commit_message, a.name AS app_name
+FROM deployments d
+JOIN apps a ON a.id = d.app_id
+WHERE ($1::text IS NULL OR a.name = $1)
+  AND ($2::text IS NULL OR d.status = $2)
+ORDER BY d.created_at DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListDeploymentsParams struct {
+	AppName pgtype.Text `json:"app_name"`
+	Status  pgtype.Text `json:"status"`
+	Off     int32       `json:"off"`
+	Lim     int32       `json:"lim"`
+}
+
+type ListDeploymentsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	AppID         pgtype.UUID        `json:"app_id"`
+	ImageTag      string             `json:"image_tag"`
+	Status        string             `json:"status"`
+	ContainerID   pgtype.Text        `json:"container_id"`
+	Port          pgtype.Int4        `json:"port"`
+	CommitSha     pgtype.Text        `json:"commit_sha"`
+	DurationMs    pgtype.Int4        `json:"duration_ms"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+	SourceType    string             `json:"source_type"`
+	Repository    pgtype.Text        `json:"repository"`
+	Branch        pgtype.Text        `json:"branch"`
+	CommitAuthor  pgtype.Text        `json:"commit_author"`
+	CommitMessage pgtype.Text        `json:"commit_message"`
+	AppName       string             `json:"app_name"`
+}
+
+func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams) ([]ListDeploymentsRow, error) {
+	rows, err := q.db.Query(ctx, listDeployments,
+		arg.AppName,
+		arg.Status,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeploymentsRow
+	for rows.Next() {
+		var i ListDeploymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ImageTag,
+			&i.Status,
+			&i.ContainerID,
+			&i.Port,
+			&i.CommitSha,
+			&i.DurationMs,
+			&i.CreatedAt,
+			&i.FinishedAt,
+			&i.SourceType,
+			&i.Repository,
+			&i.Branch,
+			&i.CommitAuthor,
+			&i.CommitMessage,
+			&i.AppName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeploymentsByApp = `-- name: ListDeploymentsByApp :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
 WHERE app_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -119,6 +273,11 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 			&i.DurationMs,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.SourceType,
+			&i.Repository,
+			&i.Branch,
+			&i.CommitAuthor,
+			&i.CommitMessage,
 		); err != nil {
 			return nil, err
 		}
@@ -131,7 +290,7 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 }
 
 const listDeploymentsForRetention = `-- name: ListDeploymentsForRetention :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
 WHERE deployments.id IN (
     SELECT d.id FROM deployments d
     WHERE d.app_id = $1
@@ -167,6 +326,11 @@ func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeplo
 			&i.DurationMs,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.SourceType,
+			&i.Repository,
+			&i.Branch,
+			&i.CommitAuthor,
+			&i.CommitMessage,
 		); err != nil {
 			return nil, err
 		}
@@ -179,7 +343,7 @@ func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeplo
 }
 
 const listRunningDeployments = `-- name: ListRunningDeployments :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at FROM deployments WHERE status = 'running'
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments WHERE status = 'running'
 `
 
 func (q *Queries) ListRunningDeployments(ctx context.Context) ([]Deployment, error) {
@@ -202,6 +366,11 @@ func (q *Queries) ListRunningDeployments(ctx context.Context) ([]Deployment, err
 			&i.DurationMs,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.SourceType,
+			&i.Repository,
+			&i.Branch,
+			&i.CommitAuthor,
+			&i.CommitMessage,
 		); err != nil {
 			return nil, err
 		}
@@ -211,6 +380,34 @@ func (q *Queries) ListRunningDeployments(ctx context.Context) ([]Deployment, err
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateDeploymentGitMetadata = `-- name: UpdateDeploymentGitMetadata :exec
+UPDATE deployments
+SET commit_sha = $1,
+    commit_author = $2,
+    commit_message = $3,
+    branch = $4
+WHERE id = $5
+`
+
+type UpdateDeploymentGitMetadataParams struct {
+	CommitSha     pgtype.Text `json:"commit_sha"`
+	CommitAuthor  pgtype.Text `json:"commit_author"`
+	CommitMessage pgtype.Text `json:"commit_message"`
+	Branch        pgtype.Text `json:"branch"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateDeploymentGitMetadata(ctx context.Context, arg UpdateDeploymentGitMetadataParams) error {
+	_, err := q.db.Exec(ctx, updateDeploymentGitMetadata,
+		arg.CommitSha,
+		arg.CommitAuthor,
+		arg.CommitMessage,
+		arg.Branch,
+		arg.ID,
+	)
+	return err
 }
 
 const updateDeploymentRunning = `-- name: UpdateDeploymentRunning :exec

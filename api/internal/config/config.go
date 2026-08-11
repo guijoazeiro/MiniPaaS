@@ -26,6 +26,8 @@ type Config struct {
 	RestartPolicy       string
 	RestartMaxRetries   int
 	MaxDeploySize       int64
+	MaxRepositorySize   int64
+	GitCloneTimeout     time.Duration
 	DashboardOrigin     string
 	LogLevel            string
 }
@@ -82,6 +84,14 @@ func Load() (*Config, error) {
 	if err != nil || maxDeploySizeMB <= 0 || maxDeploySizeMB > 10_240 {
 		return nil, fmt.Errorf("config: MAX_DEPLOY_SIZE_MB must be an integer between 1 and 10240")
 	}
+	maxRepositorySizeMB, err := strconv.ParseInt(env("MAX_REPOSITORY_SIZE_MB", "250"), 10, 64)
+	if err != nil || maxRepositorySizeMB <= 0 || maxRepositorySizeMB > 10_240 {
+		return nil, fmt.Errorf("config: MAX_REPOSITORY_SIZE_MB must be an integer between 1 and 10240")
+	}
+	gitCloneTimeout, err := time.ParseDuration(env("GIT_CLONE_TIMEOUT", "10m"))
+	if err != nil || gitCloneTimeout <= 0 {
+		return nil, fmt.Errorf("config: GIT_CLONE_TIMEOUT must be a positive duration")
+	}
 
 	return &Config{
 		Port:                env("PORT", ":8080"),
@@ -99,6 +109,8 @@ func Load() (*Config, error) {
 		RestartPolicy:       restartPolicy,
 		RestartMaxRetries:   restartMaxRetries,
 		MaxDeploySize:       maxDeploySizeMB * 1024 * 1024,
+		MaxRepositorySize:   maxRepositorySizeMB * 1024 * 1024,
+		GitCloneTimeout:     gitCloneTimeout,
 		DashboardOrigin:     env("DASHBOARD_ORIGIN", "http://localhost:3000"),
 		LogLevel:            env("LOG_LEVEL", "info"),
 	}, nil

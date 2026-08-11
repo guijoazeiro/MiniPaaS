@@ -18,8 +18,30 @@ type DeploymentService interface {
 	Create(ctx context.Context, appName string) (domain.Deployment, domain.App, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
 	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
+	ListAll(ctx context.Context, appName, status string, page, perPage int) (domain.DeploymentPage, error)
 	RunBuild(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader) error
 	Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error)
+}
+
+func (h *DeploymentHandler) ListAll(c *gin.Context) {
+	page := queryInt(c, "page", 1, 1, 100000)
+	perPage := queryInt(c, "per_page", 50, 1, 200)
+	result, err := h.svc.ListAll(c.Request.Context(), c.Query("app"), c.Query("status"), page, perPage)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func queryInt(c *gin.Context, key string, fallback, min, max int) int {
+	value := fallback
+	if raw := c.Query(key); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= min && parsed <= max {
+			value = parsed
+		}
+	}
+	return value
 }
 
 type AppLookup interface {

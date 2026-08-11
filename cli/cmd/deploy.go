@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	deployApp string
-	deployPoll bool
+	deployApp    string
+	deployPoll   bool
+	deployGit    bool
+	deployBranch string
 )
 
 var deployCmd = &cobra.Command{
@@ -23,6 +25,27 @@ var deployCmd = &cobra.Command{
 		if deployApp == "" {
 			return fmt.Errorf("--app is required")
 		}
+		if deployGit {
+			if len(args) > 0 {
+				return fmt.Errorf("path cannot be used with --git")
+			}
+			fmt.Fprintf(os.Stderr, "requesting GitHub deploy from %s...\n", apiClient.Host())
+			dep, err := apiClient.DeployGit(deployApp, deployBranch)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("deployment %s  status=%s", dep.ID, dep.Status)
+			if dep.Repository != "" {
+				fmt.Printf("  source=%s@%s", dep.Repository, dep.Branch)
+			}
+			fmt.Println()
+			if !deployPoll {
+				fmt.Println("(pass --wait to poll until running or failed)")
+				return nil
+			}
+			return waitForDeployment(deployApp, dep.ID)
+		}
+
 		path := "."
 		if len(args) > 0 {
 			path = args[0]
@@ -81,4 +104,6 @@ func waitForDeployment(app, id string) error {
 func init() {
 	deployCmd.Flags().StringVar(&deployApp, "app", "", "target app name (required)")
 	deployCmd.Flags().BoolVar(&deployPoll, "wait", false, "poll until running or failed")
+	deployCmd.Flags().BoolVar(&deployGit, "git", false, "deploy the connected GitHub repository")
+	deployCmd.Flags().StringVar(&deployBranch, "branch", "", "branch override for --git")
 }

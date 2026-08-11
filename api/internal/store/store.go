@@ -44,9 +44,22 @@ type DeploymentStore interface {
 	GetActive(ctx context.Context, appID uuid.UUID) (domain.Deployment, error)
 	ListRunning(ctx context.Context) ([]domain.Deployment, error)
 	ListByApp(ctx context.Context, appID uuid.UUID, limit int) ([]domain.Deployment, error)
+	ListAll(ctx context.Context, appName, status string, limit, offset int) ([]domain.DeploymentListItem, error)
+	CountAll(ctx context.Context, appName, status string) (int64, error)
 	ListForRetention(ctx context.Context, appID uuid.UUID, keep int) ([]domain.Deployment, error)
 	UpdateRunning(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeploymentStatus) error
+}
+
+type GitDeploymentStore interface {
+	CreateGit(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string) (domain.Deployment, error)
+	UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error
+}
+
+type GitSourceStore interface {
+	Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error)
+	Get(ctx context.Context, appID uuid.UUID) (domain.GitSource, error)
+	Delete(ctx context.Context, appID uuid.UUID) error
 }
 
 type RollbackStore interface {

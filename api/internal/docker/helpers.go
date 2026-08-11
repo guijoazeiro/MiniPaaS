@@ -9,9 +9,13 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-func ImageBuildOptions(tag string) build.ImageBuildOptions {
+func ImageBuildOptions(tag, dockerfile string) build.ImageBuildOptions {
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
 	return build.ImageBuildOptions{
 		Tags:        []string{tag},
+		Dockerfile:  dockerfile,
 		Remove:      true,
 		ForceRemove: true,
 	}

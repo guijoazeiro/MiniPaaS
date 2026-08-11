@@ -40,6 +40,7 @@ const statusLabels: Record<string, string> = {
   building: "Construindo",
   superseded: "Substituído",
   rolled_back: "Revertido",
+  stopped: "Parada",
 };
 
 export function stateLabel(status: string) {

@@ -46,4 +46,10 @@ func TestLoadUsesDefaultMaxDeploySize(t *testing.T) {
 	if cfg.MaxDeploySize != 100*1024*1024 {
 		t.Fatalf("MaxDeploySize = %d, want %d", cfg.MaxDeploySize, 100*1024*1024)
 	}
+	if cfg.MaxRepositorySize != 250*1024*1024 {
+		t.Fatalf("MaxRepositorySize = %d, want %d", cfg.MaxRepositorySize, 250*1024*1024)
+	}
+	if cfg.GitCloneTimeout.String() != "10m0s" {
+		t.Fatalf("GitCloneTimeout = %s, want 10m", cfg.GitCloneTimeout)
+	}
 }

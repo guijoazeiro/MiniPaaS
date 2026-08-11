@@ -51,7 +51,11 @@ func New(host string) (*Client, error) {
 func (c *Client) Close() error { return c.cli.Close() }
 
 func (c *Client) BuildImage(ctx context.Context, tar io.Reader, tag string) (io.ReadCloser, error) {
-	resp, err := c.cli.ImageBuild(ctx, tar, ImageBuildOptions(tag))
+	return c.BuildImageWithDockerfile(ctx, tar, tag, "Dockerfile")
+}
+
+func (c *Client) BuildImageWithDockerfile(ctx context.Context, tar io.Reader, tag, dockerfile string) (io.ReadCloser, error) {
+	resp, err := c.cli.ImageBuild(ctx, tar, ImageBuildOptions(tag, dockerfile))
 	if err != nil {
 		return nil, fmt.Errorf("docker.BuildImage: %w", err)
 	}
@@ -126,6 +130,9 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (ContainerStat
 
 func (c *Client) StopContainer(ctx context.Context, id string) error {
 	if err := c.cli.ContainerStop(ctx, id, container.StopOptions{}); err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("docker.StopContainer: %w", err)
 	}
 	return nil
@@ -134,6 +141,9 @@ func (c *Client) StopContainer(ctx context.Context, id string) error {
 func (c *Client) RemoveContainer(ctx context.Context, id string) error {
 	err := c.cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: true})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("docker.RemoveContainer: %w", err)
 	}
 	return nil

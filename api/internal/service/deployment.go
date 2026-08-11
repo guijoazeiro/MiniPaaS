@@ -22,6 +22,10 @@ type DockerRunner interface {
 	RemoveImage(ctx context.Context, ref string) error
 }
 
+type DockerfileBuilder interface {
+	BuildImageWithDockerfile(ctx context.Context, tar io.Reader, tag, dockerfile string) (io.ReadCloser, error)
+}
+
 type CaddyRouter interface {
 	UpsertRoute(ctx context.Context, appName string, port int) (publicURL string, err error)
 	RemoveRoute(ctx context.Context, appName string) error
@@ -68,6 +72,23 @@ func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.
 	return dep, app, nil
 }
 
+func (s *DeploymentService) CreateGit(ctx context.Context, appName, repository, branch string) (domain.Deployment, domain.App, error) {
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, err
+	}
+	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
+	gitDeps, ok := s.deps.(store.GitDeploymentStore)
+	if !ok {
+		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: git deployment store unavailable")
+	}
+	dep, err := gitDeps.CreateGit(ctx, app.ID, tag, repository, branch)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: %w", err)
+	}
+	return dep, app, nil
+}
+
 func (s *DeploymentService) Get(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
 	return s.deps.GetByID(ctx, id)
 }
@@ -79,14 +100,41 @@ func (s *DeploymentService) ListByApp(ctx context.Context, appID uuid.UUID, limi
 	return s.deps.ListByApp(ctx, appID, limit)
 }
 
+func (s *DeploymentService) ListAll(ctx context.Context, appName, status string, page, perPage int) (domain.DeploymentPage, error) {
+	items, err := s.deps.ListAll(ctx, appName, status, perPage, (page-1)*perPage)
+	if err != nil {
+		return domain.DeploymentPage{}, fmt.Errorf("service.ListDeployments: %w", err)
+	}
+	total, err := s.deps.CountAll(ctx, appName, status)
+	if err != nil {
+		return domain.DeploymentPage{}, fmt.Errorf("service.CountDeployments: %w", err)
+	}
+	if items == nil {
+		items = []domain.DeploymentListItem{}
+	}
+	return domain.DeploymentPage{Items: items, Page: page, PerPage: perPage, Total: total}, nil
+}
+
 func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader) error {
+	return s.RunBuildWithDockerfile(ctx, dep, app, src, "Dockerfile")
+}
+
+func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader, dockerfile string) error {
 	start := time.Now()
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
 	}
 
-	buildLog, err := s.docker.BuildImage(ctx, src, dep.ImageTag)
+	var buildLog io.ReadCloser
+	var err error
+	if dockerfile == "" || dockerfile == "Dockerfile" {
+		buildLog, err = s.docker.BuildImage(ctx, src, dep.ImageTag)
+	} else if builder, ok := s.docker.(DockerfileBuilder); ok {
+		buildLog, err = builder.BuildImageWithDockerfile(ctx, src, dep.ImageTag, dockerfile)
+	} else {
+		err = fmt.Errorf("custom Dockerfile builds are unavailable")
+	}
 	if err != nil {
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
@@ -98,6 +146,12 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 	}
 	_ = buildLog.Close()
 
+	envVars, err := s.env.Decrypted(ctx, app.ID)
+	if err != nil {
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
+	}
+
 	if prev, err := s.deps.GetActive(ctx, app.ID); err == nil && prev.ContainerID != "" {
 		if err := s.docker.StopContainer(ctx, prev.ContainerID); err != nil {
 			s.log.Warn("stop previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
@@ -106,12 +160,6 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 			s.log.Warn("remove previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
 		}
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
-	}
-
-	envVars, err := s.env.Decrypted(ctx, app.ID)
-	if err != nil {
-		s.markFailed(ctx, dep.ID, app.ID)
-		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
 	}
 
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
@@ -154,6 +202,18 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 	return nil
 }
 
+func (s *DeploymentService) UpdateGitMetadata(ctx context.Context, depID uuid.UUID, sha, author, message, branch string) error {
+	gitDeps, ok := s.deps.(store.GitDeploymentStore)
+	if !ok {
+		return fmt.Errorf("git deployment store unavailable")
+	}
+	return gitDeps.UpdateGitMetadata(ctx, depID, sha, author, message, branch)
+}
+
+func (s *DeploymentService) MarkFailed(ctx context.Context, depID, appID uuid.UUID) {
+	s.markFailed(ctx, depID, appID)
+}
+
 func (s *DeploymentService) Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error) {
 	start := time.Now()
 
@@ -171,7 +231,7 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if target.ImageTag == "" {
 		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
 	}
-	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
+	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack && target.Status != domain.DeploymentStatusStopped {
 		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
 	}
 
@@ -268,25 +328,49 @@ func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
 	}
 	dep, err := s.deps.GetActive(ctx, app.ID)
 	if err != nil {
-		return nil
+		if !errors.Is(err, domain.ErrDeploymentNotFound) {
+			return fmt.Errorf("service.StopApp: get active deployment: %w", err)
+		}
+		deployments, listErr := s.deps.ListByApp(ctx, app.ID, 50)
+		if listErr != nil {
+			return fmt.Errorf("service.StopApp: list deployments: %w", listErr)
+		}
+		if len(deployments) > 0 {
+			candidate := deployments[0]
+			if candidate.ContainerID != "" && candidate.Status == domain.DeploymentStatusFailed {
+				dep = candidate
+			}
+		}
 	}
-	if dep.ContainerID == "" {
-		return nil
+	if dep.ContainerID != "" {
+		if err := s.docker.StopContainer(ctx, dep.ContainerID); err != nil {
+			s.log.Warn("stop container", "container", dep.ContainerID, "err", err)
+		}
+		if err := s.docker.RemoveContainer(ctx, dep.ContainerID); err != nil {
+			return fmt.Errorf("service.StopApp: %w", err)
+		}
+		if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusStopped); err != nil {
+			return fmt.Errorf("service.StopApp: mark deployment stopped: %w", err)
+		}
 	}
-	if err := s.docker.StopContainer(ctx, dep.ContainerID); err != nil {
-		s.log.Warn("stop container", "container", dep.ContainerID, "err", err)
+	if err := s.apps.UpdateStatus(ctx, app.ID, domain.AppStatusStopped); err != nil {
+		return fmt.Errorf("service.StopApp: mark app stopped: %w", err)
 	}
-	if err := s.docker.RemoveContainer(ctx, dep.ContainerID); err != nil {
-		return fmt.Errorf("service.StopApp: %w", err)
+	if err := s.apps.UpdatePublicURL(ctx, app.ID, ""); err != nil {
+		return fmt.Errorf("service.StopApp: clear public URL: %w", err)
 	}
-	return s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusSuperseded)
+	return nil
 }
 
 func (s *DeploymentService) markFailed(ctx context.Context, depID, appID uuid.UUID) {
 	if err := s.deps.UpdateStatus(ctx, depID, domain.DeploymentStatusFailed); err != nil {
 		s.log.Error("mark deployment failed", "deployment", depID, "err", err)
 	}
-	if err := s.apps.UpdateStatus(ctx, appID, domain.AppStatusFailed); err != nil {
+	status := domain.AppStatusFailed
+	if _, err := s.deps.GetActive(ctx, appID); err == nil {
+		status = domain.AppStatusRunning
+	}
+	if err := s.apps.UpdateStatus(ctx, appID, status); err != nil {
 		s.log.Error("mark app failed", "app", appID, "err", err)
 	}
 }

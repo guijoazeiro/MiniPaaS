@@ -33,6 +33,12 @@ func (f *fakeDeploymentStore) GetActive(context.Context, uuid.UUID) (domain.Depl
 func (f *fakeDeploymentStore) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return f.recent, nil
 }
+func (f *fakeDeploymentStore) ListAll(context.Context, string, string, int, int) ([]domain.DeploymentListItem, error) {
+	return nil, nil
+}
+func (f *fakeDeploymentStore) CountAll(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
 func (f *fakeDeploymentStore) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return nil, errors.New("not implemented")
 }
@@ -137,5 +143,21 @@ func TestCheckerContainerStateFallsBackToLatestDeployment(t *testing.T) {
 	}
 	if state != "exited" {
 		t.Fatalf("ContainerState() = %q, want exited", state)
+	}
+}
+
+func TestCheckerContainerStateReportsStoppedWithoutInspectingRemovedContainer(t *testing.T) {
+	appID := uuid.New()
+	deps := &fakeDeploymentStore{
+		activeErr: domain.ErrDeploymentNotFound,
+		recent:    []domain.Deployment{{AppID: appID, ContainerID: "removed", Status: domain.DeploymentStatusStopped}},
+	}
+	checker := New(deps, &fakeAppStore{}, fakeInspector{states: map[string]docker.ContainerState{}}, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	state, err := checker.ContainerState(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "stopped" {
+		t.Fatalf("ContainerState() = %q, want stopped", state)
 	}
 }

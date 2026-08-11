@@ -3,7 +3,7 @@ export type Theme = "light" | "dark";
 export type App = {
   id: string;
   name: string;
-  status: "idle" | "running" | "failed";
+  status: "idle" | "running" | "failed" | "stopped";
   container_state?: string;
   public_url?: string;
   created_at: string;
@@ -12,11 +12,34 @@ export type App = {
 
 export type Deployment = {
   id: string;
+  app_id: string;
+  app_name?: string;
   image_tag: string;
-  status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back";
+  status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back" | "stopped";
   port?: number;
   duration_ms?: number;
   created_at: string;
+  source_type?: "upload" | "git";
+  repository?: string;
+  branch?: string;
+  commit_sha?: string;
+  commit_author?: string;
+  commit_message?: string;
+};
+
+export type DeploymentPage = {
+  items: Deployment[];
+  page: number;
+  per_page: number;
+  total: number;
+};
+
+export type GitSource = {
+  app_id: string;
+  repository: string;
+  branch: string;
+  build_context: string;
+  dockerfile_path: string;
 };
 
 export type EnvKey = {
