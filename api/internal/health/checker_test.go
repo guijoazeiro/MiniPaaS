@@ -139,3 +139,19 @@ func TestCheckerContainerStateFallsBackToLatestDeployment(t *testing.T) {
 		t.Fatalf("ContainerState() = %q, want exited", state)
 	}
 }
+
+func TestCheckerContainerStateReportsStoppedWithoutInspectingRemovedContainer(t *testing.T) {
+	appID := uuid.New()
+	deps := &fakeDeploymentStore{
+		activeErr: domain.ErrDeploymentNotFound,
+		recent:    []domain.Deployment{{AppID: appID, ContainerID: "removed", Status: domain.DeploymentStatusStopped}},
+	}
+	checker := New(deps, &fakeAppStore{}, fakeInspector{states: map[string]docker.ContainerState{}}, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	state, err := checker.ContainerState(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != "stopped" {
+		t.Fatalf("ContainerState() = %q, want stopped", state)
+	}
+}

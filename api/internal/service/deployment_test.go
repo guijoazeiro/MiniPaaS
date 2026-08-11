@@ -16,6 +16,8 @@ import (
 type rollbackDeploymentStore struct {
 	target      domain.Deployment
 	active      domain.Deployment
+	activeErr   error
+	recent      []domain.Deployment
 	activeCalls int
 	statuses    []domain.DeploymentStatus
 }
@@ -28,13 +30,13 @@ func (s *rollbackDeploymentStore) GetByID(context.Context, uuid.UUID) (domain.De
 }
 func (s *rollbackDeploymentStore) GetActive(context.Context, uuid.UUID) (domain.Deployment, error) {
 	s.activeCalls++
-	return s.active, nil
+	return s.active, s.activeErr
 }
 func (s *rollbackDeploymentStore) ListRunning(context.Context) ([]domain.Deployment, error) {
 	return nil, nil
 }
 func (s *rollbackDeploymentStore) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
-	return nil, nil
+	return s.recent, nil
 }
 func (s *rollbackDeploymentStore) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
 	return nil, nil
@@ -50,6 +52,7 @@ func (s *rollbackDeploymentStore) UpdateStatus(_ context.Context, _ uuid.UUID, s
 type rollbackAppStore struct {
 	app      domain.App
 	statuses []domain.AppStatus
+	urls     []string
 }
 
 func (s *rollbackAppStore) Create(context.Context, string) (domain.App, error) {
@@ -63,8 +66,11 @@ func (s *rollbackAppStore) UpdateStatus(_ context.Context, _ uuid.UUID, status d
 	s.statuses = append(s.statuses, status)
 	return nil
 }
-func (s *rollbackAppStore) UpdatePublicURL(context.Context, uuid.UUID, string) error { return nil }
-func (s *rollbackAppStore) Delete(context.Context, uuid.UUID) error                  { return nil }
+func (s *rollbackAppStore) UpdatePublicURL(_ context.Context, _ uuid.UUID, url string) error {
+	s.urls = append(s.urls, url)
+	return nil
+}
+func (s *rollbackAppStore) Delete(context.Context, uuid.UUID) error { return nil }
 
 type rollbackDocker struct {
 	mutations int
@@ -116,6 +122,75 @@ func TestDeployResolvesEnvironmentBeforeStoppingActiveContainer(t *testing.T) {
 		t.Fatalf("failed prerequisite caused %d docker mutations", dk.mutations)
 	}
 }
+
+func TestStopAppPreservesAppAndMarksRuntimeStopped(t *testing.T) {
+	appID := uuid.New()
+	deps := &rollbackDeploymentStore{active: domain.Deployment{ID: uuid.New(), AppID: appID, ContainerID: "active", Status: domain.DeploymentStatusRunning}}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app", Status: domain.AppStatusRunning, PublicURL: "https://app.example"}}
+	dk := &rollbackDocker{}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	if err := svc.StopApp(context.Background(), apps.app); err != nil {
+		t.Fatal(err)
+	}
+	if dk.mutations != 2 {
+		t.Fatalf("docker mutations = %d, want stop and remove", dk.mutations)
+	}
+	if got := deps.statuses[len(deps.statuses)-1]; got != domain.DeploymentStatusStopped {
+		t.Fatalf("deployment status = %s", got)
+	}
+	if len(apps.statuses) != 1 || apps.statuses[0] != domain.AppStatusStopped {
+		t.Fatalf("app statuses = %v", apps.statuses)
+	}
+	if len(apps.urls) != 1 || apps.urls[0] != "" {
+		t.Fatalf("public URLs = %v", apps.urls)
+	}
+}
+
+func TestStopAppIsIdempotentAfterRuntimeWasStopped(t *testing.T) {
+	appID := uuid.New()
+	deps := &rollbackDeploymentStore{
+		activeErr: domain.ErrDeploymentNotFound,
+		recent:    []domain.Deployment{{ID: uuid.New(), AppID: appID, Status: domain.DeploymentStatusStopped, ContainerID: "removed"}},
+	}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app", Status: domain.AppStatusStopped}}
+	dk := &rollbackDocker{}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	if err := svc.StopApp(context.Background(), apps.app); err != nil {
+		t.Fatal(err)
+	}
+	if dk.mutations != 0 {
+		t.Fatalf("idempotent stop caused %d Docker mutations", dk.mutations)
+	}
+	if len(deps.statuses) != 0 {
+		t.Fatalf("deployment statuses = %v", deps.statuses)
+	}
+}
+
+func TestRollbackReactivatesStoppedDeployment(t *testing.T) {
+	appID := uuid.New()
+	targetID := uuid.New()
+	deps := &rollbackDeploymentStore{
+		target:    domain.Deployment{ID: targetID, AppID: appID, ImageTag: "app:stopped", Status: domain.DeploymentStatusStopped},
+		activeErr: domain.ErrDeploymentNotFound,
+	}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app", Status: domain.AppStatusStopped}}
+	dk := &rollbackDocker{}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	restored, err := svc.Rollback(context.Background(), "app", targetID, "dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.ID != targetID {
+		t.Fatalf("restored deployment = %s", restored.ID)
+	}
+	if dk.mutations != 1 {
+		t.Fatalf("docker mutations = %d, want one container start", dk.mutations)
+	}
+}
+
 func (d *rollbackDocker) RunContainer(context.Context, docker.RunOptions) (docker.ContainerInfo, error) {
 	d.mutations++
 	return docker.ContainerInfo{}, nil

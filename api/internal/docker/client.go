@@ -130,6 +130,9 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (ContainerStat
 
 func (c *Client) StopContainer(ctx context.Context, id string) error {
 	if err := c.cli.ContainerStop(ctx, id, container.StopOptions{}); err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("docker.StopContainer: %w", err)
 	}
 	return nil
@@ -138,6 +141,9 @@ func (c *Client) StopContainer(ctx context.Context, id string) error {
 func (c *Client) RemoveContainer(ctx context.Context, id string) error {
 	err := c.cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: true})
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("docker.RemoveContainer: %w", err)
 	}
 	return nil

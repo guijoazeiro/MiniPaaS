@@ -216,7 +216,7 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if target.ImageTag == "" {
 		return domain.Deployment{}, fmt.Errorf("target deployment has no image tag")
 	}
-	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack {
+	if target.Status != domain.DeploymentStatusSuperseded && target.Status != domain.DeploymentStatusRolledBack && target.Status != domain.DeploymentStatusStopped {
 		return domain.Deployment{}, domain.ErrDeploymentNotRollbackable
 	}
 
@@ -313,18 +313,38 @@ func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
 	}
 	dep, err := s.deps.GetActive(ctx, app.ID)
 	if err != nil {
-		return nil
+		if !errors.Is(err, domain.ErrDeploymentNotFound) {
+			return fmt.Errorf("service.StopApp: get active deployment: %w", err)
+		}
+		deployments, listErr := s.deps.ListByApp(ctx, app.ID, 50)
+		if listErr != nil {
+			return fmt.Errorf("service.StopApp: list deployments: %w", listErr)
+		}
+		if len(deployments) > 0 {
+			candidate := deployments[0]
+			if candidate.ContainerID != "" && candidate.Status == domain.DeploymentStatusFailed {
+				dep = candidate
+			}
+		}
 	}
-	if dep.ContainerID == "" {
-		return nil
+	if dep.ContainerID != "" {
+		if err := s.docker.StopContainer(ctx, dep.ContainerID); err != nil {
+			s.log.Warn("stop container", "container", dep.ContainerID, "err", err)
+		}
+		if err := s.docker.RemoveContainer(ctx, dep.ContainerID); err != nil {
+			return fmt.Errorf("service.StopApp: %w", err)
+		}
+		if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusStopped); err != nil {
+			return fmt.Errorf("service.StopApp: mark deployment stopped: %w", err)
+		}
 	}
-	if err := s.docker.StopContainer(ctx, dep.ContainerID); err != nil {
-		s.log.Warn("stop container", "container", dep.ContainerID, "err", err)
+	if err := s.apps.UpdateStatus(ctx, app.ID, domain.AppStatusStopped); err != nil {
+		return fmt.Errorf("service.StopApp: mark app stopped: %w", err)
 	}
-	if err := s.docker.RemoveContainer(ctx, dep.ContainerID); err != nil {
-		return fmt.Errorf("service.StopApp: %w", err)
+	if err := s.apps.UpdatePublicURL(ctx, app.ID, ""); err != nil {
+		return fmt.Errorf("service.StopApp: clear public URL: %w", err)
 	}
-	return s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusSuperseded)
+	return nil
 }
 
 func (s *DeploymentService) markFailed(ctx context.Context, depID, appID uuid.UUID) {

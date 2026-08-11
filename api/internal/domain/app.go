@@ -12,6 +12,7 @@ const (
 	AppStatusIdle    AppStatus = "idle"
 	AppStatusRunning AppStatus = "running"
 	AppStatusFailed  AppStatus = "failed"
+	AppStatusStopped AppStatus = "stopped"
 )
 
 type App struct {
@@ -33,6 +34,7 @@ const (
 	DeploymentStatusFailed     DeploymentStatus = "failed"
 	DeploymentStatusSuperseded DeploymentStatus = "superseded"
 	DeploymentStatusRolledBack DeploymentStatus = "rolled_back"
+	DeploymentStatusStopped    DeploymentStatus = "stopped"
 )
 
 type User struct {
