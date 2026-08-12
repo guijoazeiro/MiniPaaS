@@ -21,7 +21,7 @@ func (q *Queries) DeleteGitSource(ctx context.Context, appID pgtype.UUID) error 
 }
 
 const getGitSource = `-- name: GetGitSource :one
-SELECT app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at FROM app_git_sources WHERE app_id = $1
+SELECT app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private FROM app_git_sources WHERE app_id = $1
 `
 
 func (q *Queries) GetGitSource(ctx context.Context, appID pgtype.UUID) (AppGitSource, error) {
@@ -35,28 +35,40 @@ func (q *Queries) GetGitSource(ctx context.Context, appID pgtype.UUID) (AppGitSo
 		&i.DockerfilePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessMode,
+		&i.GithubInstallationID,
+		&i.GithubRepositoryID,
+		&i.Private,
 	)
 	return i, err
 }
 
 const upsertGitSource = `-- name: UpsertGitSource :one
-INSERT INTO app_git_sources (app_id, repository, branch, build_context, dockerfile_path)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO app_git_sources (app_id, repository, branch, build_context, dockerfile_path, access_mode, github_installation_id, github_repository_id, private)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (app_id) DO UPDATE SET
     repository = EXCLUDED.repository,
     branch = EXCLUDED.branch,
     build_context = EXCLUDED.build_context,
     dockerfile_path = EXCLUDED.dockerfile_path,
+    access_mode = EXCLUDED.access_mode,
+    github_installation_id = EXCLUDED.github_installation_id,
+    github_repository_id = EXCLUDED.github_repository_id,
+    private = EXCLUDED.private,
     updated_at = now()
-RETURNING app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at
+RETURNING app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private
 `
 
 type UpsertGitSourceParams struct {
-	AppID          pgtype.UUID `json:"app_id"`
-	Repository     string      `json:"repository"`
-	Branch         string      `json:"branch"`
-	BuildContext   string      `json:"build_context"`
-	DockerfilePath string      `json:"dockerfile_path"`
+	AppID                pgtype.UUID `json:"app_id"`
+	Repository           string      `json:"repository"`
+	Branch               string      `json:"branch"`
+	BuildContext         string      `json:"build_context"`
+	DockerfilePath       string      `json:"dockerfile_path"`
+	AccessMode           string      `json:"access_mode"`
+	GithubInstallationID pgtype.Int8 `json:"github_installation_id"`
+	GithubRepositoryID   pgtype.Int8 `json:"github_repository_id"`
+	Private              bool        `json:"private"`
 }
 
 func (q *Queries) UpsertGitSource(ctx context.Context, arg UpsertGitSourceParams) (AppGitSource, error) {
@@ -66,6 +78,10 @@ func (q *Queries) UpsertGitSource(ctx context.Context, arg UpsertGitSourceParams
 		arg.Branch,
 		arg.BuildContext,
 		arg.DockerfilePath,
+		arg.AccessMode,
+		arg.GithubInstallationID,
+		arg.GithubRepositoryID,
+		arg.Private,
 	)
 	var i AppGitSource
 	err := row.Scan(
@@ -76,6 +92,10 @@ func (q *Queries) UpsertGitSource(ctx context.Context, arg UpsertGitSourceParams
 		&i.DockerfilePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessMode,
+		&i.GithubInstallationID,
+		&i.GithubRepositoryID,
+		&i.Private,
 	)
 	return i, err
 }

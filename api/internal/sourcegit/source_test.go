@@ -104,6 +104,17 @@ func TestSecureDockerfileRequiresRegularFile(t *testing.T) {
 	}
 }
 
+func TestPreparePrivateRepositoryRequiresTokenProvider(t *testing.T) {
+	installationID, repositoryID := int64(42), int64(99)
+	_, err := New(1024).Prepare(context.Background(), domain.GitSource{
+		Repository: "acme/private-api", AccessMode: domain.GitAccessGitHubApp,
+		GitHubInstallationID: &installationID, GitHubRepositoryID: &repositoryID,
+	}, "main")
+	if !errors.Is(err, domain.ErrGitHubInstallationInvalid) {
+		t.Fatalf("Prepare() error = %v, want ErrGitHubInstallationInvalid", err)
+	}
+}
+
 func TestPreparePublicGitHubIntegration(t *testing.T) {
 	repository := os.Getenv("GITHUB_INTEGRATION_REPOSITORY")
 	if repository == "" {

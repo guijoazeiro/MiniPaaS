@@ -356,6 +356,9 @@ minip apps list
 minip apps info <name>                 # status + container state + public URL + recent deployments
 minip apps connect-github <name> --repo owner/repository
 minip apps connect-github <name> --repo owner/repository --branch main --context services/api --dockerfile Dockerfile
+minip apps github-installations
+minip apps github-repositories <installation-id>
+minip apps connect-github <name> --installation <id> --repository-id <id>
 minip apps git-source <name>            # connected repository and build settings
 minip apps disconnect-github <name>
 minip deploy [path] --app <name>       # tarball + upload (default path = .)
@@ -393,7 +396,29 @@ Example for a monorepo whose application lives in `services/api`:
 .\minip.exe apps info hello
 ```
 
-Private repositories are intentionally not part of Phase 9.1. They will use a GitHub App with short-lived installation tokens after this public flow is validated end to end.
+### Private repositories with a GitHub App
+
+Phase 9.2 supports private repositories through an instance-owned GitHub App. MiniPaaS stores only installation and repository identifiers. It requests a repository-scoped installation token when listing or cloning and never persists or returns that token.
+
+Create a GitHub App with:
+
+- Setup URL: `http://localhost:8080/integrations/github/callback` (replace the API origin outside local development).
+- Repository permission **Contents: Read-only**. Metadata read access is included by GitHub.
+- Webhooks disabled for now; signed push webhooks belong to Phase 10.
+- Installation limited to the accounts and repositories that this MiniPaaS instance may deploy.
+
+Generate a private key for the App, store the PEM outside the repository, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY_PATH`. Restart the API, open a project's **Configurações → GitHub → GitHub App**, install/authorize the App, and select the repository.
+
+The CLI can reuse an installation created through the dashboard:
+
+```powershell
+.\minip.exe apps github-installations
+.\minip.exe apps github-repositories 12345678
+.\minip.exe apps connect-github hello --installation 12345678 --repository-id 987654321 --branch main
+.\minip.exe deploy --git --app hello --wait
+```
+
+The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value. This Phase 9.2 flow assumes the GitHub App is private and controlled by the same administrator as the self-hosted MiniPaaS instance.
 
 ## Project layout
 
@@ -453,7 +478,10 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `HEALTH_CHECK_INTERVAL` | no | `30s` | How often running containers are inspected; `exited`, `dead`, and missing containers are marked failed. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
 | `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
-| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a public GitHub clone. The Docker build keeps its existing lifecycle. |
+| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. The Docker build keeps its existing lifecycle. |
+| `GITHUB_APP_ID` | conditional | — | Numeric App ID used for private repository access. Must be set with the slug and private-key path. |
+| `GITHUB_APP_SLUG` | conditional | — | Slug from the GitHub App settings page. |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | conditional | — | Absolute path to the GitHub App private-key PEM. Keep this file outside the repository. |
 | `RESTART_POLICY` | no | `on-failure` | Docker restart policy for app containers: `no`, `always`, `on-failure`, or `unless-stopped`. |
 | `RESTART_MAX_RETRIES` | no | `3` | Maximum retries used by Docker's `on-failure` restart policy. |
 | `DASHBOARD_ORIGIN` | no | `http://localhost:3000` | Browser origin allowed to authenticate with the API dashboard cookie. |

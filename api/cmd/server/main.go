@@ -16,6 +16,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/crypto"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/githubapp"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler/middleware"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/health"
@@ -75,13 +76,33 @@ func main() {
 	envStore := postgres.NewEnvStore(q)
 	rollbackStore := postgres.NewRollbackStore(q)
 	gitSourceStore := postgres.NewGitSourceStore(q)
+	githubInstallationStore := postgres.NewGitHubInstallationStore(q)
+
+	var githubClient service.GitHubAppClient
+	var githubTokens sourcegit.InstallationTokenProvider
+	var githubStates service.GitHubStateSigner
+	if cfg.GitHubAppID > 0 {
+		client, err := githubapp.NewFromFile(cfg.GitHubAppID, cfg.GitHubAppSlug, cfg.GitHubAppPrivateKeyPath, cfg.GitHubAPIURL)
+		if err != nil {
+			log.Error("githubapp.New", "err", err)
+			os.Exit(1)
+		}
+		githubClient = client
+		githubTokens = client
+		githubStates = githubapp.NewStateSigner([]byte(cfg.JWTSecret))
+	}
 
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
 	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log)
-	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore)
-	gitDepSvc := service.NewGitDeploymentService(gitSourceStore, appStore, depSvc, sourcegit.New(cfg.MaxRepositorySize), cfg.GitCloneTimeout)
+	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
+	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
+	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)
+	if githubTokens != nil {
+		gitPreparer = sourcegit.NewWithTokenProvider(cfg.MaxRepositorySize, githubTokens)
+	}
+	gitDepSvc := service.NewGitDeploymentService(gitSourceStore, appStore, depSvc, gitPreparer, cfg.GitCloneTimeout)
 	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
@@ -93,6 +114,7 @@ func main() {
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log)
+	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
 
@@ -128,8 +150,15 @@ func main() {
 	auth.GET("/apps/:name/deployments/:id", depH.Get)
 	auth.POST("/apps/:name/rollback", depH.Rollback)
 	auth.PUT("/apps/:name/source/git", gitH.Configure)
+	auth.PUT("/apps/:name/source/github-app", gitH.ConfigureGitHubApp)
 	auth.GET("/apps/:name/source/git", gitH.Get)
 	auth.DELETE("/apps/:name/source/git", gitH.Delete)
+
+	auth.GET("/integrations/github/status", githubH.Status)
+	auth.GET("/integrations/github/install-url", githubH.InstallURL)
+	auth.GET("/integrations/github/callback", githubH.Callback)
+	auth.GET("/integrations/github/installations", githubH.ListInstallations)
+	auth.GET("/integrations/github/installations/:id/repositories", githubH.ListRepositories)
 
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)

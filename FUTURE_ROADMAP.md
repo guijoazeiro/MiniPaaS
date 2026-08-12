@@ -36,6 +36,8 @@ Allow an application to connect to a GitHub repository and start a deployment wi
 - Prefer a GitHub App with short-lived installation tokens for private access.
 - If a personal access token is supported initially, encrypt it at rest and never return it through the API.
 
+Phase 9.1 delivered public repositories. Phase 9.2 adds private repositories through a GitHub App, short-lived installation tokens, repository selection in the dashboard, and equivalent CLI configuration for existing installations.
+
 ## Phase 10 — Webhooks, auto-deploy, and build visibility
 
 Turn GitHub pushes into traceable, automatic deployments.
@@ -147,4 +149,3 @@ The strongest next sequence for product value and portfolio depth is:
 4. Persistent and streamed build logs.
 5. Zero-downtime route switching with readiness checks.
 6. Custom domains and lightweight metrics.
-

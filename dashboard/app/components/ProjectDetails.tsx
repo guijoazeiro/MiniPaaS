@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError, formatTime, request, stateLabel } from "../lib/api";
 import { useLogStream } from "../hooks/useLogStream";
-import type { App, Deployment, EnvKey, GitSource } from "../types";
+import type { App, Deployment, EnvKey, GitHubInstallation, GitHubRepository, GitSource } from "../types";
 import { DeployPanel } from "./DeployPanel";
 import { DeploymentList } from "./DeploymentList";
 import { EnvPanel } from "./EnvPanel";
@@ -41,6 +41,7 @@ export function ProjectDetails({ name }: { name: string }) {
   const [savingEnv, setSavingEnv] = useState(false);
   const [deletingEnvKey, setDeletingEnvKey] = useState("");
   const [gitSource, setGitSource] = useState<GitSource | null>(null);
+  const [gitMode, setGitMode] = useState<"public" | "github_app">("public");
   const [gitRepository, setGitRepository] = useState("");
   const [gitBranch, setGitBranch] = useState("main");
   const [gitBuildContext, setGitBuildContext] = useState(".");
@@ -48,6 +49,12 @@ export function ProjectDetails({ name }: { name: string }) {
   const [savingGit, setSavingGit] = useState(false);
   const [deployingGit, setDeployingGit] = useState(false);
   const [disconnectingGit, setDisconnectingGit] = useState(false);
+  const [githubEnabled, setGitHubEnabled] = useState(false);
+  const [githubLoading, setGitHubLoading] = useState(false);
+  const [githubInstallations, setGitHubInstallations] = useState<GitHubInstallation[]>([]);
+  const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
+  const [githubInstallationID, setGitHubInstallationID] = useState("");
+  const [githubRepositoryID, setGitHubRepositoryID] = useState("");
   const logStream = useLogStream(true, tab === "logs" ? name : "");
 
   const refreshProject = useCallback(async () => {
@@ -88,6 +95,9 @@ export function ProjectDetails({ name }: { name: string }) {
         setGitBranch(source.branch);
         setGitBuildContext(source.build_context);
         setGitDockerfile(source.dockerfile_path);
+        setGitMode(source.access_mode || "public");
+        setGitHubInstallationID(source.github_installation_id ? String(source.github_installation_id) : "");
+        setGitHubRepositoryID(source.github_repository_id ? String(source.github_repository_id) : "");
       })
       .catch((cause: unknown) => {
         if (!active) return;
@@ -99,6 +109,55 @@ export function ProjectDetails({ name }: { name: string }) {
       });
     return () => { active = false; };
   }, [name, setFeedback]);
+
+  const loadGitHubInstallations = useCallback(async () => {
+    setGitHubLoading(true);
+    try {
+      const status = await request<{ enabled: boolean }>("/integrations/github/status");
+      setGitHubEnabled(status.enabled);
+      if (!status.enabled) {
+        setGitHubInstallations([]);
+        setGitHubRepositories([]);
+        return;
+      }
+      const installations = await request<GitHubInstallation[]>("/integrations/github/installations");
+      setGitHubInstallations(installations);
+      setGitHubInstallationID((current) => current || (installations[0] ? String(installations[0].installation_id) : ""));
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível carregar a integração com o GitHub.", "error");
+    } finally {
+      setGitHubLoading(false);
+    }
+  }, [setFeedback]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadGitHubInstallations(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadGitHubInstallations]);
+
+  useEffect(() => {
+    if (!githubEnabled || !githubInstallationID) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setGitHubLoading(true);
+      request<GitHubRepository[]>(`/integrations/github/installations/${encodeURIComponent(githubInstallationID)}/repositories`)
+        .then((repositories) => { if (active) setGitHubRepositories(repositories); })
+        .catch((cause: unknown) => { if (active) setFeedback(cause instanceof Error ? cause.message : "Não foi possível carregar os repositórios.", "error"); })
+        .finally(() => { if (active) setGitHubLoading(false); });
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [githubEnabled, githubInstallationID, setFeedback]);
+
+  useEffect(() => {
+    if (searchParams.get("github") !== "connected") return;
+    const timer = window.setTimeout(() => {
+      setGitMode("github_app");
+      setFeedback("GitHub App conectado. Selecione o repositório privado.");
+      void loadGitHubInstallations();
+      router.replace(`/dashboard/projects/${encodeURIComponent(name)}?tab=settings`);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadGitHubInstallations, name, router, searchParams, setFeedback]);
 
   function changeTab(nextTab: Tab) {
     router.replace(nextTab === "overview" ? `/dashboard/projects/${encodeURIComponent(name)}` : `/dashboard/projects/${encodeURIComponent(name)}?tab=${nextTab}`);
@@ -152,17 +211,49 @@ export function ProjectDetails({ name }: { name: string }) {
 
   async function saveGitSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!gitRepository.trim()) return;
+    if (gitMode === "public" && !gitRepository.trim()) return;
+    if (gitMode === "github_app" && (!githubInstallationID || !githubRepositoryID)) return;
     setSavingGit(true);
     try {
-      const source = await request<GitSource>(`/apps/${encodeURIComponent(name)}/source/git`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository: gitRepository.trim(), branch: gitBranch, build_context: gitBuildContext, dockerfile_path: gitDockerfile }) });
+      const path = gitMode === "public" ? "source/git" : "source/github-app";
+      const body = gitMode === "public"
+        ? { repository: gitRepository.trim(), branch: gitBranch, build_context: gitBuildContext, dockerfile_path: gitDockerfile }
+        : { installation_id: Number(githubInstallationID), repository_id: Number(githubRepositoryID), branch: gitBranch, build_context: gitBuildContext, dockerfile_path: gitDockerfile };
+      const source = await request<GitSource>(`/apps/${encodeURIComponent(name)}/${path}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       setGitSource(source);
+      setGitRepository(source.repository);
+      setGitBranch(source.branch);
       setFeedback(`Repositório ${source.repository} conectado.`);
     } catch (cause) {
       setFeedback(cause instanceof Error ? cause.message : "Não foi possível conectar o repositório.", "error");
     } finally {
       setSavingGit(false);
     }
+  }
+
+  async function installGitHubApp() {
+    setGitHubLoading(true);
+    try {
+      const response = await request<{ url: string }>(`/integrations/github/install-url?app=${encodeURIComponent(name)}`);
+      window.location.assign(response.url);
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível iniciar a instalação do GitHub App.", "error");
+      setGitHubLoading(false);
+    }
+  }
+
+  function selectPrivateRepository(value: string) {
+    setGitHubRepositoryID(value);
+    const repository = githubRepositories.find((item) => String(item.id) === value);
+    if (!repository) return;
+    setGitRepository(repository.full_name);
+    setGitBranch(repository.default_branch || "main");
+  }
+
+  function selectGitHubInstallation(value: string) {
+    setGitHubInstallationID(value);
+    setGitHubRepositoryID("");
+    setGitHubRepositories([]);
   }
 
   async function deployGit() {
@@ -184,7 +275,7 @@ export function ProjectDetails({ name }: { name: string }) {
     setDisconnectingGit(true);
     try {
       await request(`/apps/${encodeURIComponent(name)}/source/git`, { method: "DELETE" });
-      setGitSource(null); setGitRepository(""); setGitBranch("main"); setGitBuildContext("."); setGitDockerfile("Dockerfile");
+      setGitSource(null); setGitMode("public"); setGitRepository(""); setGitBranch("main"); setGitBuildContext("."); setGitDockerfile("Dockerfile"); setGitHubRepositoryID("");
       setFeedback("Repositório desconectado.");
     } catch (cause) {
       setFeedback(cause instanceof Error ? cause.message : "Não foi possível desconectar o repositório.", "error");
@@ -235,7 +326,7 @@ export function ProjectDetails({ name }: { name: string }) {
       {tab === "overview" && <div className="project-section-stack"><DeployPanel app={app} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={confirmingStop} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => undefined} onRequestStop={stopApp} onCancelStop={() => setConfirmingStop(false)} /><section className="panel project-summary"><div className="section-heading"><div><p className="eyebrow">ÚLTIMA ATIVIDADE</p><h2>Resumo operacional</h2></div></div><div className="summary-grid"><div><span>Origem</span><strong>{gitSource ? "GitHub" : "Upload manual"}</strong><small>{gitSource?.repository || "Nenhum repositório conectado"}</small></div><div><span>Deployments</span><strong>{deployments.length}</strong><small>{deployments[0] ? `Último: ${stateLabel(deployments[0].status)}` : "Nenhum release"}</small></div><div><span>Variáveis</span><strong>{envKeys.length}</strong><small>nomes configurados</small></div></div></section></div>}
       {tab === "deployments" && <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} />}
       {tab === "logs" && <LogViewer logs={logStream.logs} outputRef={logStream.outputRef} following={logStream.following} connection={logStream.connection} dedicated onScroll={logStream.handleScroll} onResume={logStream.resumeFollowing} onClear={logStream.clearLogs} />}
-      {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
+      {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
     </>
   );
 }

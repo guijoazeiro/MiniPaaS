@@ -62,6 +62,12 @@ type GitSourceStore interface {
 	Delete(ctx context.Context, appID uuid.UUID) error
 }
 
+type GitHubInstallationStore interface {
+	Upsert(ctx context.Context, installation domain.GitHubInstallation) (domain.GitHubInstallation, error)
+	Get(ctx context.Context, installationID int64) (domain.GitHubInstallation, error)
+	List(ctx context.Context) ([]domain.GitHubInstallation, error)
+}
+
 type RollbackStore interface {
 	Record(ctx context.Context, appID, fromDep, toDep uuid.UUID, triggeredBy string) error
 }

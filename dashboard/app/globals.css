@@ -43,8 +43,16 @@
 .git-panel { grid-column: 1 / -1; }
 .connection-state { padding: 6px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 11px; }
 .connection-state.connected { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+.git-mode-switch { display: inline-flex; gap: 4px; margin-top: 18px; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.git-mode-switch button { min-height: 34px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; }
+.git-mode-switch button.active { border-color: color-mix(in srgb, var(--violet) 38%, var(--line)); background: color-mix(in srgb, var(--surface) 82%, var(--violet) 8%); color: var(--ink); }
 .git-source-form { display: grid; grid-template-columns: 1.4fr .7fr .7fr .7fr; gap: 10px; margin-top: 18px; }
 .git-source-form input { min-width: 0; font: 11px var(--font-geist-mono), monospace; }
+.github-app-fields { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(180px, .8fr) minmax(240px, 1.3fr) auto; align-items: end; gap: 10px; }
+.github-install-button { min-height: 42px; white-space: nowrap; }
+.integration-notice { grid-column: 1 / -1; display: grid; gap: 5px; padding: 14px 15px; border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--surface) 82%, transparent); }
+.integration-notice strong { font-size: 12px; }
+.integration-notice span { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .git-source-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; margin-top: 4px; }
 .text-button.danger { margin-left: auto; color: var(--bad); }
 .git-help { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -54,6 +62,8 @@
 @media (max-width: 960px) {
   .git-source-form { grid-template-columns: 1fr 1fr; }
   .git-repository-field { grid-column: 1 / -1; }
+  .github-app-fields { grid-template-columns: 1fr 1fr; }
+  .github-install-button { grid-column: 1 / -1; }
 }
 
 @media (max-width: 640px) {
@@ -61,6 +71,8 @@
   .git-repository-field { grid-column: auto; }
   .git-source-actions { align-items: stretch; flex-direction: column; }
   .text-button.danger { margin-left: 0; }
+  .github-app-fields { grid-template-columns: 1fr; }
+  .git-mode-switch { display: grid; grid-template-columns: 1fr 1fr; }
   .selected-actions, .stop-confirmation { align-items: flex-end; flex-direction: column; }
   .stop-confirmation { padding: 8px 0 0; border-top: 1px solid var(--line); border-left: 0; }
 }

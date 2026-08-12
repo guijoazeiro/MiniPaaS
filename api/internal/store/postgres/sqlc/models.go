@@ -18,13 +18,17 @@ type App struct {
 }
 
 type AppGitSource struct {
-	AppID          pgtype.UUID        `json:"app_id"`
-	Repository     string             `json:"repository"`
-	Branch         string             `json:"branch"`
-	BuildContext   string             `json:"build_context"`
-	DockerfilePath string             `json:"dockerfile_path"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	AppID                pgtype.UUID        `json:"app_id"`
+	Repository           string             `json:"repository"`
+	Branch               string             `json:"branch"`
+	BuildContext         string             `json:"build_context"`
+	DockerfilePath       string             `json:"dockerfile_path"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	AccessMode           string             `json:"access_mode"`
+	GithubInstallationID pgtype.Int8        `json:"github_installation_id"`
+	GithubRepositoryID   pgtype.Int8        `json:"github_repository_id"`
+	Private              bool               `json:"private"`
 }
 
 type Deployment struct {
@@ -53,6 +57,15 @@ type EnvVar struct {
 	Nonce     []byte             `json:"nonce"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GithubInstallation struct {
+	InstallationID      int64              `json:"installation_id"`
+	AccountLogin        string             `json:"account_login"`
+	AccountType         string             `json:"account_type"`
+	RepositorySelection string             `json:"repository_selection"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RollbackHistory struct {

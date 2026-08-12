@@ -51,11 +51,29 @@ type Deployment struct {
 }
 
 type GitSource struct {
-	AppID          string `json:"app_id"`
-	Repository     string `json:"repository"`
-	Branch         string `json:"branch"`
-	BuildContext   string `json:"build_context"`
-	DockerfilePath string `json:"dockerfile_path"`
+	AppID                string `json:"app_id"`
+	Repository           string `json:"repository"`
+	Branch               string `json:"branch"`
+	BuildContext         string `json:"build_context"`
+	DockerfilePath       string `json:"dockerfile_path"`
+	AccessMode           string `json:"access_mode"`
+	GitHubInstallationID int64  `json:"github_installation_id,omitempty"`
+	GitHubRepositoryID   int64  `json:"github_repository_id,omitempty"`
+	Private              bool   `json:"private"`
+}
+
+type GitHubInstallation struct {
+	InstallationID      int64  `json:"installation_id"`
+	AccountLogin        string `json:"account_login"`
+	AccountType         string `json:"account_type"`
+	RepositorySelection string `json:"repository_selection"`
+}
+
+type GitHubRepository struct {
+	ID            int64  `json:"id"`
+	FullName      string `json:"full_name"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 func (c *Client) ListDeployments(app string) ([]Deployment, error) {
@@ -138,6 +156,38 @@ func (c *Client) ConfigureGitSource(app string, source GitSource) (*GitSource, e
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) ConfigureGitHubAppSource(app string, installationID, repositoryID int64, branch, buildContext, dockerfilePath string) (*GitSource, error) {
+	body, _ := json.Marshal(map[string]any{
+		"installation_id": installationID,
+		"repository_id":   repositoryID,
+		"branch":          branch,
+		"build_context":   buildContext,
+		"dockerfile_path": dockerfilePath,
+	})
+	var out GitSource
+	if err := c.doJSON(http.MethodPut, "/apps/"+app+"/source/github-app", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) ListGitHubInstallations() ([]GitHubInstallation, error) {
+	var out []GitHubInstallation
+	if err := c.doJSON(http.MethodGet, "/integrations/github/installations", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) ListGitHubRepositories(installationID int64) ([]GitHubRepository, error) {
+	var out []GitHubRepository
+	path := fmt.Sprintf("/integrations/github/installations/%d/repositories", installationID)
+	if err := c.doJSON(http.MethodGet, path, nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) GetGitSource(app string) (*GitSource, error) {
