@@ -59,7 +59,7 @@ export function GlobalDeploymentsPage() {
                 <Link href={`/dashboard/projects/${encodeURIComponent(deployment.app_name || "")}`}>{deployment.app_name}</Link>
                 <span className="deployment-reference"><strong>{deployment.commit_sha?.slice(0, 8) || deployment.id.slice(0, 8)}</strong><small>{deployment.commit_message?.split("\n")[0] || deployment.image_tag}</small></span>
                 <span><span className={`status-pill ${deployment.status}`}><i />{stateLabel(deployment.status)}</span></span>
-                <span className="deployment-reference"><strong>{deployment.source_type === "git" ? "GitHub" : "Upload"}</strong><small>{deployment.repository ? `${deployment.repository}@${deployment.branch || "main"}` : "Arquivo .tar"}</small></span>
+                <span className="deployment-reference"><strong>{deployment.source_type === "git" ? deployment.trigger_type === "webhook" ? "GitHub · automático" : "GitHub" : "Upload"}</strong><small>{deployment.repository ? `${deployment.repository}@${deployment.branch || "main"}` : "Arquivo .tar"}</small></span>
                 <span>{formatDuration(deployment.duration_ms)}</span>
                 <span>{formatTime(deployment.created_at)}</span>
               </article>

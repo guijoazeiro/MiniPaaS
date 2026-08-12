@@ -50,11 +50,13 @@ export function ProjectDetails({ name }: { name: string }) {
   const [deployingGit, setDeployingGit] = useState(false);
   const [disconnectingGit, setDisconnectingGit] = useState(false);
   const [githubEnabled, setGitHubEnabled] = useState(false);
+  const [githubWebhooksEnabled, setGitHubWebhooksEnabled] = useState(false);
   const [githubLoading, setGitHubLoading] = useState(false);
   const [githubInstallations, setGitHubInstallations] = useState<GitHubInstallation[]>([]);
   const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
   const [githubInstallationID, setGitHubInstallationID] = useState("");
   const [githubRepositoryID, setGitHubRepositoryID] = useState("");
+  const [togglingAutoDeploy, setTogglingAutoDeploy] = useState(false);
   const logStream = useLogStream(true, tab === "logs" ? name : "");
 
   const refreshProject = useCallback(async () => {
@@ -113,8 +115,9 @@ export function ProjectDetails({ name }: { name: string }) {
   const loadGitHubInstallations = useCallback(async () => {
     setGitHubLoading(true);
     try {
-      const status = await request<{ enabled: boolean }>("/integrations/github/status");
+      const status = await request<{ enabled: boolean; webhooks_enabled: boolean }>("/integrations/github/status");
       setGitHubEnabled(status.enabled);
+      setGitHubWebhooksEnabled(status.webhooks_enabled);
       if (!status.enabled) {
         setGitHubInstallations([]);
         setGitHubRepositories([]);
@@ -256,6 +259,22 @@ export function ProjectDetails({ name }: { name: string }) {
     setGitHubRepositories([]);
   }
 
+  async function toggleAutoDeploy() {
+    if (!gitSource) return;
+    setTogglingAutoDeploy(true);
+    try {
+      const source = await request<GitSource>(`/apps/${encodeURIComponent(name)}/source/git/auto-deploy`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !gitSource.auto_deploy }),
+      });
+      setGitSource(source);
+      setFeedback(source.auto_deploy ? `Deploy automático habilitado para ${source.branch}.` : "Deploy automático desabilitado.");
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível alterar o deploy automático.", "error");
+    } finally {
+      setTogglingAutoDeploy(false);
+    }
+  }
+
   async function deployGit() {
     if (!gitSource) return;
     setDeployingGit(true);
@@ -326,7 +345,7 @@ export function ProjectDetails({ name }: { name: string }) {
       {tab === "overview" && <div className="project-section-stack"><DeployPanel app={app} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={confirmingStop} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => undefined} onRequestStop={stopApp} onCancelStop={() => setConfirmingStop(false)} /><section className="panel project-summary"><div className="section-heading"><div><p className="eyebrow">ÚLTIMA ATIVIDADE</p><h2>Resumo operacional</h2></div></div><div className="summary-grid"><div><span>Origem</span><strong>{gitSource ? "GitHub" : "Upload manual"}</strong><small>{gitSource?.repository || "Nenhum repositório conectado"}</small></div><div><span>Deployments</span><strong>{deployments.length}</strong><small>{deployments[0] ? `Último: ${stateLabel(deployments[0].status)}` : "Nenhum release"}</small></div><div><span>Variáveis</span><strong>{envKeys.length}</strong><small>nomes configurados</small></div></div></section></div>}
       {tab === "deployments" && <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} />}
       {tab === "logs" && <LogViewer logs={logStream.logs} outputRef={logStream.outputRef} following={logStream.following} connection={logStream.connection} dedicated onScroll={logStream.handleScroll} onResume={logStream.resumeFollowing} onClear={logStream.clearLogs} />}
-      {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
+      {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} webhooksEnabled={githubWebhooksEnabled} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} togglingAutoDeploy={togglingAutoDeploy} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onToggleAutoDeploy={toggleAutoDeploy} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
     </>
   );
 }

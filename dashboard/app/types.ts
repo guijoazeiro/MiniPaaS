@@ -25,6 +25,8 @@ export type Deployment = {
   commit_sha?: string;
   commit_author?: string;
   commit_message?: string;
+  trigger_type?: "manual" | "webhook";
+  github_delivery_id?: string;
 };
 
 export type DeploymentPage = {
@@ -44,6 +46,7 @@ export type GitSource = {
   github_installation_id?: number;
   github_repository_id?: number;
   private: boolean;
+  auto_deploy: boolean;
 };
 
 export type GitHubInstallation = {
