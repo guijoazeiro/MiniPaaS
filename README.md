@@ -359,6 +359,7 @@ minip apps connect-github <name> --repo owner/repository --branch main --context
 minip apps github-installations
 minip apps github-repositories <installation-id>
 minip apps connect-github <name> --installation <id> --repository-id <id>
+minip apps auto-deploy <name> on
 minip apps git-source <name>            # connected repository and build settings
 minip apps disconnect-github <name>
 minip deploy [path] --app <name>       # tarball + upload (default path = .)
@@ -404,7 +405,7 @@ Create a GitHub App with:
 
 - Setup URL: `http://localhost:8080/integrations/github/callback` (replace the API origin outside local development).
 - Repository permission **Contents: Read-only**. Metadata read access is included by GitHub.
-- Webhooks disabled for now; signed push webhooks belong to Phase 10.
+- For auto-deploy, enable the webhook, subscribe only to **Push**, and use `<PUBLIC_API_URL>/integrations/github/webhook` as its URL.
 - Installation limited to the accounts and repositories that this MiniPaaS instance may deploy.
 
 Generate a private key for the App, store the PEM outside the repository, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY_PATH`. Restart the API, open a project's **Configurações → GitHub → GitHub App**, install/authorize the App, and select the repository.
@@ -419,6 +420,29 @@ The CLI can reuse an installation created through the dashboard:
 ```
 
 The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value. This Phase 9.2 flow assumes the GitHub App is private and controlled by the same administrator as the self-hosted MiniPaaS instance.
+
+### Signed push auto-deploy
+
+Phase 10.1 can create a deployment automatically when GitHub sends a push for the repository and branch configured on an application. Configure a random, high-entropy webhook secret in the GitHub App and expose the API through HTTPS; GitHub cannot deliver events directly to `localhost`.
+
+```env
+GITHUB_WEBHOOK_SECRET=use-a-long-random-value
+```
+
+In the GitHub App settings:
+
+- Set **Webhook URL** to `https://your-public-api.example/integrations/github/webhook`.
+- Set **Webhook secret** to exactly the same value as `GITHUB_WEBHOOK_SECRET`.
+- Keep **Active** enabled and subscribe to the **Push** event.
+- During local development, use a trusted HTTPS tunnel that forwards to `http://localhost:8080`.
+
+After restarting the API, enable auto-deploy from **Projeto → Configurações → GitHub** or with:
+
+```powershell
+.\minip.exe apps auto-deploy hello on
+```
+
+MiniPaaS validates `X-Hub-Signature-256` with HMAC-SHA256 before processing the body, deduplicates deliveries using `X-GitHub-Delivery`, and only starts a deployment when repository, installation, and branch all match. Deleting a branch, pushing another branch, or replaying the same delivery does not create another deployment. Releases created from a push expose `trigger_type=webhook` and their GitHub delivery ID.
 
 ## Project layout
 
@@ -482,6 +506,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `GITHUB_APP_ID` | conditional | — | Numeric App ID used for private repository access. Must be set with the slug and private-key path. |
 | `GITHUB_APP_SLUG` | conditional | — | Slug from the GitHub App settings page. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | conditional | — | Absolute path to the GitHub App private-key PEM. Keep this file outside the repository. |
+| `GITHUB_WEBHOOK_SECRET` | no | — | Enables signed GitHub push webhooks and auto-deploy. Must match the secret configured on the GitHub App. |
 | `RESTART_POLICY` | no | `on-failure` | Docker restart policy for app containers: `no`, `always`, `on-failure`, or `unless-stopped`. |
 | `RESTART_MAX_RETRIES` | no | `3` | Maximum retries used by Docker's `on-failure` restart policy. |
 | `DASHBOARD_ORIGIN` | no | `http://localhost:3000` | Browser origin allowed to authenticate with the API dashboard cookie. |
