@@ -9,6 +9,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type GitSourceStore struct {
@@ -21,11 +22,15 @@ func NewGitSourceStore(q *sqlc.Queries) *GitSourceStore {
 
 func (s *GitSourceStore) Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error) {
 	row, err := s.q.UpsertGitSource(ctx, sqlc.UpsertGitSourceParams{
-		AppID:          uuidToPG(source.AppID),
-		Repository:     source.Repository,
-		Branch:         source.Branch,
-		BuildContext:   source.BuildContext,
-		DockerfilePath: source.DockerfilePath,
+		AppID:                uuidToPG(source.AppID),
+		Repository:           source.Repository,
+		Branch:               source.Branch,
+		BuildContext:         source.BuildContext,
+		DockerfilePath:       source.DockerfilePath,
+		AccessMode:           source.AccessMode,
+		GithubInstallationID: optionalInt8(source.GitHubInstallationID),
+		GithubRepositoryID:   optionalInt8(source.GitHubRepositoryID),
+		Private:              source.Private,
 	})
 	if err != nil {
 		return domain.GitSource{}, fmt.Errorf("store.UpsertGitSource: %w", err)
@@ -53,12 +58,31 @@ func (s *GitSourceStore) Delete(ctx context.Context, appID uuid.UUID) error {
 
 func toDomainGitSource(row sqlc.AppGitSource) domain.GitSource {
 	return domain.GitSource{
-		AppID:          pgToUUID(row.AppID),
-		Repository:     row.Repository,
-		Branch:         row.Branch,
-		BuildContext:   row.BuildContext,
-		DockerfilePath: row.DockerfilePath,
-		CreatedAt:      row.CreatedAt.Time,
-		UpdatedAt:      row.UpdatedAt.Time,
+		AppID:                pgToUUID(row.AppID),
+		Repository:           row.Repository,
+		Branch:               row.Branch,
+		BuildContext:         row.BuildContext,
+		DockerfilePath:       row.DockerfilePath,
+		AccessMode:           row.AccessMode,
+		GitHubInstallationID: int8Pointer(row.GithubInstallationID),
+		GitHubRepositoryID:   int8Pointer(row.GithubRepositoryID),
+		Private:              row.Private,
+		CreatedAt:            row.CreatedAt.Time,
+		UpdatedAt:            row.UpdatedAt.Time,
 	}
+}
+
+func optionalInt8(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
+}
+
+func int8Pointer(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Int64
+	return &result
 }

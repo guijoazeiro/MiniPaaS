@@ -80,11 +80,36 @@ type DeploymentPage struct {
 }
 
 type GitSource struct {
-	AppID          uuid.UUID `json:"app_id"`
-	Repository     string    `json:"repository"`
-	Branch         string    `json:"branch"`
-	BuildContext   string    `json:"build_context"`
-	DockerfilePath string    `json:"dockerfile_path"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	AppID                uuid.UUID `json:"app_id"`
+	Repository           string    `json:"repository"`
+	Branch               string    `json:"branch"`
+	BuildContext         string    `json:"build_context"`
+	DockerfilePath       string    `json:"dockerfile_path"`
+	AccessMode           string    `json:"access_mode"`
+	GitHubInstallationID *int64    `json:"github_installation_id,omitempty"`
+	GitHubRepositoryID   *int64    `json:"github_repository_id,omitempty"`
+	Private              bool      `json:"private"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+const (
+	GitAccessPublic    = "public"
+	GitAccessGitHubApp = "github_app"
+)
+
+type GitHubInstallation struct {
+	InstallationID      int64     `json:"installation_id"`
+	AccountLogin        string    `json:"account_login"`
+	AccountType         string    `json:"account_type"`
+	RepositorySelection string    `json:"repository_selection"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type GitHubRepository struct {
+	ID            int64  `json:"id"`
+	FullName      string `json:"full_name"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
 }
