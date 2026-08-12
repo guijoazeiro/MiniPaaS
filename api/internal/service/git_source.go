@@ -13,10 +13,19 @@ import (
 type GitSourceService struct {
 	apps    store.AppStore
 	sources store.GitSourceStore
+	github  GitHubRepositoryProvider
 }
 
-func NewGitSourceService(apps store.AppStore, sources store.GitSourceStore) *GitSourceService {
-	return &GitSourceService{apps: apps, sources: sources}
+type GitHubRepositoryProvider interface {
+	Repository(ctx context.Context, installationID, repositoryID int64) (domain.GitHubRepository, error)
+}
+
+func NewGitSourceService(apps store.AppStore, sources store.GitSourceStore, github ...GitHubRepositoryProvider) *GitSourceService {
+	service := &GitSourceService{apps: apps, sources: sources}
+	if len(github) > 0 {
+		service.github = github[0]
+	}
+	return service
 }
 
 func (s *GitSourceService) Configure(ctx context.Context, appName string, source domain.GitSource) (domain.GitSource, error) {
@@ -25,6 +34,55 @@ func (s *GitSourceService) Configure(ctx context.Context, appName string, source
 		return domain.GitSource{}, err
 	}
 	source.AppID = app.ID
+	source.AccessMode = domain.GitAccessPublic
+	source.GitHubInstallationID = nil
+	source.GitHubRepositoryID = nil
+	source.Private = false
+	source.Repository, err = sourcegit.NormalizeRepository(source.Repository)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	source.Branch, err = sourcegit.NormalizeBranch(source.Branch)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	source.BuildContext, err = sourcegit.NormalizeRelativePath(source.BuildContext, ".")
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	source.DockerfilePath, err = sourcegit.NormalizeRelativePath(source.DockerfilePath, "Dockerfile")
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	return s.sources.Upsert(ctx, source)
+}
+
+func (s *GitSourceService) ConfigureGitHubApp(ctx context.Context, appName string, installationID, repositoryID int64, branch, buildContext, dockerfilePath string) (domain.GitSource, error) {
+	if s.github == nil {
+		return domain.GitSource{}, domain.ErrGitHubAppNotConfigured
+	}
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	repository, err := s.github.Repository(ctx, installationID, repositoryID)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	if branch == "" {
+		branch = repository.DefaultBranch
+	}
+	source := domain.GitSource{
+		AppID:                app.ID,
+		Repository:           repository.FullName,
+		Branch:               branch,
+		BuildContext:         buildContext,
+		DockerfilePath:       dockerfilePath,
+		AccessMode:           domain.GitAccessGitHubApp,
+		GitHubInstallationID: &installationID,
+		GitHubRepositoryID:   &repositoryID,
+		Private:              repository.Private,
+	}
 	source.Repository, err = sourcegit.NormalizeRepository(source.Repository)
 	if err != nil {
 		return domain.GitSource{}, err

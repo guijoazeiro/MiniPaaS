@@ -42,3 +42,6 @@ Thumbs.db
 
 
 node_modules/
+
+# key files
+*.pem

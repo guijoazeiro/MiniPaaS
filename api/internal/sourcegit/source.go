@@ -12,6 +12,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 )
 
@@ -32,9 +33,18 @@ type Preparer interface {
 
 type Client struct {
 	maxBytes int64
+	tokens   InstallationTokenProvider
 }
 
 func New(maxBytes int64) *Client { return &Client{maxBytes: maxBytes} }
+
+type InstallationTokenProvider interface {
+	InstallationToken(ctx context.Context, installationID, repositoryID int64) (string, error)
+}
+
+func NewWithTokenProvider(maxBytes int64, tokens InstallationTokenProvider) *Client {
+	return &Client{maxBytes: maxBytes, tokens: tokens}
+}
 
 func NormalizeRepository(raw string) (string, error) {
 	value := strings.TrimSpace(strings.TrimSuffix(raw, "/"))
@@ -97,12 +107,23 @@ func (c *Client) Prepare(ctx context.Context, source domain.GitSource, branch st
 	if err != nil {
 		return fail(err)
 	}
-	repo, err := git.PlainCloneContext(ctx, repoDir, false, &git.CloneOptions{
+	cloneOptions := &git.CloneOptions{
 		URL:           "https://github.com/" + repository + ".git",
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
 		SingleBranch:  true,
 		Depth:         1,
-	})
+	}
+	if source.AccessMode == domain.GitAccessGitHubApp {
+		if c.tokens == nil || source.GitHubInstallationID == nil || source.GitHubRepositoryID == nil {
+			return fail(domain.ErrGitHubInstallationInvalid)
+		}
+		token, tokenErr := c.tokens.InstallationToken(ctx, *source.GitHubInstallationID, *source.GitHubRepositoryID)
+		if tokenErr != nil {
+			return fail(fmt.Errorf("authorize GitHub repository clone: %w", tokenErr))
+		}
+		cloneOptions.Auth = &githttp.BasicAuth{Username: "x-access-token", Password: token}
+	}
+	repo, err := git.PlainCloneContext(ctx, repoDir, false, cloneOptions)
 	if err != nil {
 		return fail(fmt.Errorf("clone GitHub repository: %w", err))
 	}

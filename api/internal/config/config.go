@@ -7,29 +7,34 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	Port                string
-	DatabaseURL         string
-	DockerHost          string
-	CaddyAdminURL       string
-	BaseDomain          string
-	EncryptionKey       []byte
-	JWTSecret           string
-	TokenTTL            time.Duration
-	AdminUsername       string
-	AdminPassword       string
-	ImageRetention      int
-	HealthCheckInterval time.Duration
-	RestartPolicy       string
-	RestartMaxRetries   int
-	MaxDeploySize       int64
-	MaxRepositorySize   int64
-	GitCloneTimeout     time.Duration
-	DashboardOrigin     string
-	LogLevel            string
+	Port                    string
+	DatabaseURL             string
+	DockerHost              string
+	CaddyAdminURL           string
+	BaseDomain              string
+	EncryptionKey           []byte
+	JWTSecret               string
+	TokenTTL                time.Duration
+	AdminUsername           string
+	AdminPassword           string
+	ImageRetention          int
+	HealthCheckInterval     time.Duration
+	RestartPolicy           string
+	RestartMaxRetries       int
+	MaxDeploySize           int64
+	MaxRepositorySize       int64
+	GitCloneTimeout         time.Duration
+	GitHubAppID             int64
+	GitHubAppSlug           string
+	GitHubAppPrivateKeyPath string
+	GitHubAPIURL            string
+	DashboardOrigin         string
+	LogLevel                string
 }
 
 func Load() (*Config, error) {
@@ -92,29 +97,55 @@ func Load() (*Config, error) {
 	if err != nil || gitCloneTimeout <= 0 {
 		return nil, fmt.Errorf("config: GIT_CLONE_TIMEOUT must be a positive duration")
 	}
+	githubAppID, githubAppSlug, githubAppKeyPath, err := githubAppConfig()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Config{
-		Port:                env("PORT", ":8080"),
-		DatabaseURL:         databaseURL,
-		DockerHost:          os.Getenv("DOCKER_HOST"),
-		CaddyAdminURL:       caddyURL,
-		BaseDomain:          baseDomain,
-		EncryptionKey:       encKey,
-		JWTSecret:           jwtSecret,
-		TokenTTL:            ttl,
-		AdminUsername:       os.Getenv("ADMIN_USERNAME"),
-		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
-		ImageRetention:      retention,
-		HealthCheckInterval: healthCheckInterval,
-		RestartPolicy:       restartPolicy,
-		RestartMaxRetries:   restartMaxRetries,
-		MaxDeploySize:       maxDeploySizeMB * 1024 * 1024,
-		MaxRepositorySize:   maxRepositorySizeMB * 1024 * 1024,
-		GitCloneTimeout:     gitCloneTimeout,
-		DashboardOrigin:     env("DASHBOARD_ORIGIN", "http://localhost:3000"),
-		LogLevel:            env("LOG_LEVEL", "info"),
+		Port:                    env("PORT", ":8080"),
+		DatabaseURL:             databaseURL,
+		DockerHost:              os.Getenv("DOCKER_HOST"),
+		CaddyAdminURL:           caddyURL,
+		BaseDomain:              baseDomain,
+		EncryptionKey:           encKey,
+		JWTSecret:               jwtSecret,
+		TokenTTL:                ttl,
+		AdminUsername:           os.Getenv("ADMIN_USERNAME"),
+		AdminPassword:           os.Getenv("ADMIN_PASSWORD"),
+		ImageRetention:          retention,
+		HealthCheckInterval:     healthCheckInterval,
+		RestartPolicy:           restartPolicy,
+		RestartMaxRetries:       restartMaxRetries,
+		MaxDeploySize:           maxDeploySizeMB * 1024 * 1024,
+		MaxRepositorySize:       maxRepositorySizeMB * 1024 * 1024,
+		GitCloneTimeout:         gitCloneTimeout,
+		GitHubAppID:             githubAppID,
+		GitHubAppSlug:           githubAppSlug,
+		GitHubAppPrivateKeyPath: githubAppKeyPath,
+		GitHubAPIURL:            env("GITHUB_API_URL", "https://api.github.com"),
+		DashboardOrigin:         env("DASHBOARD_ORIGIN", "http://localhost:3000"),
+		LogLevel:                env("LOG_LEVEL", "info"),
 	}, nil
 
+}
+
+func githubAppConfig() (int64, string, string, error) {
+	rawID := strings.TrimSpace(os.Getenv("GITHUB_APP_ID"))
+	slug := strings.TrimSpace(os.Getenv("GITHUB_APP_SLUG"))
+	keyPath := strings.TrimSpace(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
+	configured := rawID != "" || slug != "" || keyPath != ""
+	if !configured {
+		return 0, "", "", nil
+	}
+	if rawID == "" || slug == "" || keyPath == "" {
+		return 0, "", "", fmt.Errorf("config: GITHUB_APP_ID, GITHUB_APP_SLUG and GITHUB_APP_PRIVATE_KEY_PATH must be set together")
+	}
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, "", "", fmt.Errorf("config: GITHUB_APP_ID must be a positive integer")
+	}
+	return id, slug, keyPath, nil
 }
 
 func requireLocalhost(raw string) error {
