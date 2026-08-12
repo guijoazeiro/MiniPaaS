@@ -73,16 +73,29 @@ func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.
 }
 
 func (s *DeploymentService) CreateGit(ctx context.Context, appName, repository, branch string) (domain.Deployment, domain.App, error) {
+	return s.CreateGitTriggered(ctx, appName, repository, branch, domain.DeploymentTriggerManual, "")
+}
+
+func (s *DeploymentService) CreateGitTriggered(ctx context.Context, appName, repository, branch, triggerType, deliveryID string) (domain.Deployment, domain.App, error) {
 	app, err := s.apps.GetByName(ctx, appName)
 	if err != nil {
 		return domain.Deployment{}, domain.App{}, err
 	}
 	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
-	gitDeps, ok := s.deps.(store.GitDeploymentStore)
-	if !ok {
-		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: git deployment store unavailable")
+	var dep domain.Deployment
+	if triggerType == domain.DeploymentTriggerWebhook {
+		gitDeps, ok := s.deps.(store.TriggeredGitDeploymentStore)
+		if !ok {
+			return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: triggered git deployment store unavailable")
+		}
+		dep, err = gitDeps.CreateGitTriggered(ctx, app.ID, tag, repository, branch, triggerType, deliveryID)
+	} else {
+		gitDeps, ok := s.deps.(store.GitDeploymentStore)
+		if !ok {
+			return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: git deployment store unavailable")
+		}
+		dep, err = gitDeps.CreateGit(ctx, app.ID, tag, repository, branch)
 	}
-	dep, err := gitDeps.CreateGit(ctx, app.ID, tag, repository, branch)
 	if err != nil {
 		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: %w", err)
 	}

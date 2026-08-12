@@ -12,6 +12,7 @@ type Props = {
   dockerfilePath: string;
   githubEnabled: boolean;
   githubLoading: boolean;
+  webhooksEnabled: boolean;
   installations: GitHubInstallation[];
   repositories: GitHubRepository[];
   selectedInstallationID: string;
@@ -19,6 +20,7 @@ type Props = {
   saving: boolean;
   deploying: boolean;
   disconnecting: boolean;
+  togglingAutoDeploy: boolean;
   onModeChange: (value: GitMode) => void;
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
@@ -27,6 +29,7 @@ type Props = {
   onInstallationChange: (value: string) => void;
   onPrivateRepositoryChange: (value: string) => void;
   onInstallGitHubApp: () => void;
+  onToggleAutoDeploy: () => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onDeploy: () => void;
   onDisconnect: () => void;
@@ -97,6 +100,12 @@ export function GitDeployPanel(props: Props) {
           {props.source && <button type="button" className="text-button danger" disabled={props.disconnecting} onClick={props.onDisconnect}>{props.disconnecting ? "Desconectando…" : "Desconectar"}</button>}
         </div>
       </form>
+      {props.source?.access_mode === "github_app" && (
+        <div className="auto-deploy-setting">
+          <div><strong>Deploy automático</strong><span>{props.webhooksEnabled ? `Criar um release quando houver push em ${props.source.branch}.` : "Configure o webhook secret na API para habilitar esta opção."}</span></div>
+          <button type="button" className={`toggle-control ${props.source.auto_deploy ? "active" : ""}`} role="switch" aria-checked={props.source.auto_deploy} disabled={!props.webhooksEnabled || props.togglingAutoDeploy} onClick={props.onToggleAutoDeploy}><i /></button>
+        </div>
+      )}
       <p className="git-help">O Dockerfile é resolvido dentro do contexto de build. No modo GitHub App, o MiniPaaS usa um token efêmero e nunca salva a credencial do repositório.</p>
     </section>
   );

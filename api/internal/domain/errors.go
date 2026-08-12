@@ -23,4 +23,7 @@ var (
 	ErrGitHubInstallationNotFound    = errors.New("GitHub App installation not found")
 	ErrGitHubInstallationInvalid     = errors.New("GitHub App installation is invalid")
 	ErrGitHubRepositoryNotAccessible = errors.New("repository is not accessible to the GitHub App installation")
+	ErrGitHubWebhookNotConfigured    = errors.New("GitHub webhook integration is not configured")
+	ErrGitHubWebhookSignatureInvalid = errors.New("GitHub webhook signature is invalid")
+	ErrGitHubAutoDeployRequiresApp   = errors.New("auto-deploy requires a GitHub App repository")
 )

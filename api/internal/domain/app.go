@@ -50,21 +50,23 @@ type EnvVarKey struct {
 }
 
 type Deployment struct {
-	ID            uuid.UUID        `json:"id"`
-	AppID         uuid.UUID        `json:"app_id"`
-	ImageTag      string           `json:"image_tag"`
-	Status        DeploymentStatus `json:"status"`
-	ContainerID   string           `json:"container_id,omitempty"`
-	Port          int              `json:"port,omitempty"`
-	CommitSHA     string           `json:"commit_sha,omitempty"`
-	SourceType    string           `json:"source_type"`
-	Repository    string           `json:"repository,omitempty"`
-	Branch        string           `json:"branch,omitempty"`
-	CommitAuthor  string           `json:"commit_author,omitempty"`
-	CommitMessage string           `json:"commit_message,omitempty"`
-	DurationMs    int              `json:"duration_ms,omitempty"`
-	CreatedAt     time.Time        `json:"created_at"`
-	FinishedAt    *time.Time       `json:"finished_at,omitempty"`
+	ID               uuid.UUID        `json:"id"`
+	AppID            uuid.UUID        `json:"app_id"`
+	ImageTag         string           `json:"image_tag"`
+	Status           DeploymentStatus `json:"status"`
+	ContainerID      string           `json:"container_id,omitempty"`
+	Port             int              `json:"port,omitempty"`
+	CommitSHA        string           `json:"commit_sha,omitempty"`
+	SourceType       string           `json:"source_type"`
+	Repository       string           `json:"repository,omitempty"`
+	Branch           string           `json:"branch,omitempty"`
+	CommitAuthor     string           `json:"commit_author,omitempty"`
+	CommitMessage    string           `json:"commit_message,omitempty"`
+	TriggerType      string           `json:"trigger_type"`
+	GitHubDeliveryID string           `json:"github_delivery_id,omitempty"`
+	DurationMs       int              `json:"duration_ms,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	FinishedAt       *time.Time       `json:"finished_at,omitempty"`
 }
 
 type DeploymentListItem struct {
@@ -89,6 +91,8 @@ type GitSource struct {
 	GitHubInstallationID *int64    `json:"github_installation_id,omitempty"`
 	GitHubRepositoryID   *int64    `json:"github_repository_id,omitempty"`
 	Private              bool      `json:"private"`
+	AutoDeploy           bool      `json:"auto_deploy"`
+	ExpectedCommitSHA    string    `json:"-"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
@@ -113,3 +117,8 @@ type GitHubRepository struct {
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
 }
+
+const (
+	DeploymentTriggerManual  = "manual"
+	DeploymentTriggerWebhook = "webhook"
+)

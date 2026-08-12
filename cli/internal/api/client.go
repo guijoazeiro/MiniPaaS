@@ -35,19 +35,21 @@ type App struct {
 }
 
 type Deployment struct {
-	ID            string `json:"id"`
-	AppID         string `json:"app_id"`
-	ImageTag      string `json:"image_tag"`
-	Status        string `json:"status"`
-	Port          int    `json:"port,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	DurationMs    int    `json:"duration_ms,omitempty"`
-	SourceType    string `json:"source_type,omitempty"`
-	Repository    string `json:"repository,omitempty"`
-	Branch        string `json:"branch,omitempty"`
-	CommitSHA     string `json:"commit_sha,omitempty"`
-	CommitAuthor  string `json:"commit_author,omitempty"`
-	CommitMessage string `json:"commit_message,omitempty"`
+	ID               string `json:"id"`
+	AppID            string `json:"app_id"`
+	ImageTag         string `json:"image_tag"`
+	Status           string `json:"status"`
+	Port             int    `json:"port,omitempty"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	DurationMs       int    `json:"duration_ms,omitempty"`
+	SourceType       string `json:"source_type,omitempty"`
+	Repository       string `json:"repository,omitempty"`
+	Branch           string `json:"branch,omitempty"`
+	CommitSHA        string `json:"commit_sha,omitempty"`
+	CommitAuthor     string `json:"commit_author,omitempty"`
+	CommitMessage    string `json:"commit_message,omitempty"`
+	TriggerType      string `json:"trigger_type,omitempty"`
+	GitHubDeliveryID string `json:"github_delivery_id,omitempty"`
 }
 
 type GitSource struct {
@@ -60,6 +62,7 @@ type GitSource struct {
 	GitHubInstallationID int64  `json:"github_installation_id,omitempty"`
 	GitHubRepositoryID   int64  `json:"github_repository_id,omitempty"`
 	Private              bool   `json:"private"`
+	AutoDeploy           bool   `json:"auto_deploy"`
 }
 
 type GitHubInstallation struct {
@@ -200,6 +203,15 @@ func (c *Client) GetGitSource(app string) (*GitSource, error) {
 
 func (c *Client) DeleteGitSource(app string) error {
 	return c.doJSON(http.MethodDelete, "/apps/"+app+"/source/git", nil, "", nil)
+}
+
+func (c *Client) SetGitAutoDeploy(app string, enabled bool) (*GitSource, error) {
+	body, _ := json.Marshal(map[string]bool{"enabled": enabled})
+	var out GitSource
+	if err := c.doJSON(http.MethodPatch, "/apps/"+app+"/source/git/auto-deploy", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *Client) DeployGit(app, branch string) (*Deployment, error) {

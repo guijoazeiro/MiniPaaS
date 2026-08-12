@@ -56,10 +56,21 @@ type GitDeploymentStore interface {
 	UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error
 }
 
+type TriggeredGitDeploymentStore interface {
+	CreateGitTriggered(ctx context.Context, appID uuid.UUID, imageTag, repository, branch, triggerType, deliveryID string) (domain.Deployment, error)
+}
+
 type GitSourceStore interface {
 	Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error)
 	Get(ctx context.Context, appID uuid.UUID) (domain.GitSource, error)
 	Delete(ctx context.Context, appID uuid.UUID) error
+	SetAutoDeploy(ctx context.Context, appID uuid.UUID, enabled bool) (domain.GitSource, error)
+	ListAutoDeployByRepository(ctx context.Context, repositoryID int64) ([]domain.GitSource, error)
+}
+
+type GitHubWebhookDeliveryStore interface {
+	Claim(ctx context.Context, deliveryID, event string, repositoryID int64, commitSHA string) (bool, error)
+	Complete(ctx context.Context, deliveryID, status, errorMessage string) error
 }
 
 type GitHubInstallationStore interface {

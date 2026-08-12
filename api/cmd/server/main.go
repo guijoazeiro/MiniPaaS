@@ -77,6 +77,7 @@ func main() {
 	rollbackStore := postgres.NewRollbackStore(q)
 	gitSourceStore := postgres.NewGitSourceStore(q)
 	githubInstallationStore := postgres.NewGitHubInstallationStore(q)
+	githubWebhookStore := postgres.NewGitHubWebhookDeliveryStore(q)
 
 	var githubClient service.GitHubAppClient
 	var githubTokens sourcegit.InstallationTokenProvider
@@ -103,6 +104,12 @@ func main() {
 		gitPreparer = sourcegit.NewWithTokenProvider(cfg.MaxRepositorySize, githubTokens)
 	}
 	gitDepSvc := service.NewGitDeploymentService(gitSourceStore, appStore, depSvc, gitPreparer, cfg.GitCloneTimeout)
+	githubWebhookSvc := service.NewGitHubWebhookService(gitSourceStore, appStore, githubWebhookStore, gitDepSvc, log)
+	webhooksEnabled := cfg.GitHubAppID > 0 && cfg.GitHubWebhookSecret != ""
+	webhookSecret := cfg.GitHubWebhookSecret
+	if !webhooksEnabled {
+		webhookSecret = ""
+	}
 	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
@@ -113,8 +120,9 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize)
-	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log)
-	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log)
+	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
+	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
+	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
 
@@ -134,6 +142,7 @@ func main() {
 	r.POST("/auth/login", authH.Login)
 	r.POST("/auth/web-login", authH.WebLogin)
 	r.POST("/auth/logout", authH.Logout)
+	r.POST("/integrations/github/webhook", githubWebhookH.Handle)
 
 	auth := r.Group("/", middleware.Auth(authSvc))
 
@@ -153,6 +162,7 @@ func main() {
 	auth.PUT("/apps/:name/source/github-app", gitH.ConfigureGitHubApp)
 	auth.GET("/apps/:name/source/git", gitH.Get)
 	auth.DELETE("/apps/:name/source/git", gitH.Delete)
+	auth.PATCH("/apps/:name/source/git/auto-deploy", gitH.SetAutoDeploy)
 
 	auth.GET("/integrations/github/status", githubH.Status)
 	auth.GET("/integrations/github/install-url", githubH.InstallURL)

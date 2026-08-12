@@ -8,6 +8,11 @@ INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
 VALUES (@app_id, @image_tag, 'git', @repository, @branch)
 RETURNING *;
 
+-- name: CreateTriggeredGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch, trigger_type, github_delivery_id)
+VALUES (@app_id, @image_tag, 'git', @repository, @branch, @trigger_type, @github_delivery_id)
+RETURNING *;
+
 -- name: UpdateDeploymentGitMetadata :exec
 UPDATE deployments
 SET commit_sha = @commit_sha,

@@ -34,7 +34,7 @@ func (q *Queries) CountDeployments(ctx context.Context, arg CountDeploymentsPara
 const createDeployment = `-- name: CreateDeployment :one
 INSERT INTO deployments (app_id, image_tag)
 VALUES ($1, $2)
-RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message
+RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id
 `
 
 type CreateDeploymentParams struct {
@@ -61,6 +61,8 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 		&i.Branch,
 		&i.CommitAuthor,
 		&i.CommitMessage,
+		&i.TriggerType,
+		&i.GithubDeliveryID,
 	)
 	return i, err
 }
@@ -68,7 +70,7 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 const createGitDeployment = `-- name: CreateGitDeployment :one
 INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
 VALUES ($1, $2, 'git', $3, $4)
-RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message
+RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id
 `
 
 type CreateGitDeploymentParams struct {
@@ -102,12 +104,61 @@ func (q *Queries) CreateGitDeployment(ctx context.Context, arg CreateGitDeployme
 		&i.Branch,
 		&i.CommitAuthor,
 		&i.CommitMessage,
+		&i.TriggerType,
+		&i.GithubDeliveryID,
+	)
+	return i, err
+}
+
+const createTriggeredGitDeployment = `-- name: CreateTriggeredGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch, trigger_type, github_delivery_id)
+VALUES ($1, $2, 'git', $3, $4, $5, $6)
+RETURNING id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id
+`
+
+type CreateTriggeredGitDeploymentParams struct {
+	AppID            pgtype.UUID `json:"app_id"`
+	ImageTag         string      `json:"image_tag"`
+	Repository       pgtype.Text `json:"repository"`
+	Branch           pgtype.Text `json:"branch"`
+	TriggerType      string      `json:"trigger_type"`
+	GithubDeliveryID pgtype.Text `json:"github_delivery_id"`
+}
+
+func (q *Queries) CreateTriggeredGitDeployment(ctx context.Context, arg CreateTriggeredGitDeploymentParams) (Deployment, error) {
+	row := q.db.QueryRow(ctx, createTriggeredGitDeployment,
+		arg.AppID,
+		arg.ImageTag,
+		arg.Repository,
+		arg.Branch,
+		arg.TriggerType,
+		arg.GithubDeliveryID,
+	)
+	var i Deployment
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.ImageTag,
+		&i.Status,
+		&i.ContainerID,
+		&i.Port,
+		&i.CommitSha,
+		&i.DurationMs,
+		&i.CreatedAt,
+		&i.FinishedAt,
+		&i.SourceType,
+		&i.Repository,
+		&i.Branch,
+		&i.CommitAuthor,
+		&i.CommitMessage,
+		&i.TriggerType,
+		&i.GithubDeliveryID,
 	)
 	return i, err
 }
 
 const getActiveDeployment = `-- name: GetActiveDeployment :one
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id FROM deployments
 WHERE app_id = $1 AND status = 'running'
 ORDER BY created_at DESC
 LIMIT 1
@@ -132,12 +183,14 @@ func (q *Queries) GetActiveDeployment(ctx context.Context, appID pgtype.UUID) (D
 		&i.Branch,
 		&i.CommitAuthor,
 		&i.CommitMessage,
+		&i.TriggerType,
+		&i.GithubDeliveryID,
 	)
 	return i, err
 }
 
 const getDeploymentByID = `-- name: GetDeploymentByID :one
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments WHERE id = $1
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id FROM deployments WHERE id = $1
 `
 
 func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deployment, error) {
@@ -159,12 +212,14 @@ func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deploy
 		&i.Branch,
 		&i.CommitAuthor,
 		&i.CommitMessage,
+		&i.TriggerType,
+		&i.GithubDeliveryID,
 	)
 	return i, err
 }
 
 const listDeployments = `-- name: ListDeployments :many
-SELECT d.id, d.app_id, d.image_tag, d.status, d.container_id, d.port, d.commit_sha, d.duration_ms, d.created_at, d.finished_at, d.source_type, d.repository, d.branch, d.commit_author, d.commit_message, a.name AS app_name
+SELECT d.id, d.app_id, d.image_tag, d.status, d.container_id, d.port, d.commit_sha, d.duration_ms, d.created_at, d.finished_at, d.source_type, d.repository, d.branch, d.commit_author, d.commit_message, d.trigger_type, d.github_delivery_id, a.name AS app_name
 FROM deployments d
 JOIN apps a ON a.id = d.app_id
 WHERE ($1::text IS NULL OR a.name = $1)
@@ -181,22 +236,24 @@ type ListDeploymentsParams struct {
 }
 
 type ListDeploymentsRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	AppID         pgtype.UUID        `json:"app_id"`
-	ImageTag      string             `json:"image_tag"`
-	Status        string             `json:"status"`
-	ContainerID   pgtype.Text        `json:"container_id"`
-	Port          pgtype.Int4        `json:"port"`
-	CommitSha     pgtype.Text        `json:"commit_sha"`
-	DurationMs    pgtype.Int4        `json:"duration_ms"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
-	SourceType    string             `json:"source_type"`
-	Repository    pgtype.Text        `json:"repository"`
-	Branch        pgtype.Text        `json:"branch"`
-	CommitAuthor  pgtype.Text        `json:"commit_author"`
-	CommitMessage pgtype.Text        `json:"commit_message"`
-	AppName       string             `json:"app_name"`
+	ID               pgtype.UUID        `json:"id"`
+	AppID            pgtype.UUID        `json:"app_id"`
+	ImageTag         string             `json:"image_tag"`
+	Status           string             `json:"status"`
+	ContainerID      pgtype.Text        `json:"container_id"`
+	Port             pgtype.Int4        `json:"port"`
+	CommitSha        pgtype.Text        `json:"commit_sha"`
+	DurationMs       pgtype.Int4        `json:"duration_ms"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
+	SourceType       string             `json:"source_type"`
+	Repository       pgtype.Text        `json:"repository"`
+	Branch           pgtype.Text        `json:"branch"`
+	CommitAuthor     pgtype.Text        `json:"commit_author"`
+	CommitMessage    pgtype.Text        `json:"commit_message"`
+	TriggerType      string             `json:"trigger_type"`
+	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
+	AppName          string             `json:"app_name"`
 }
 
 func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams) ([]ListDeploymentsRow, error) {
@@ -229,6 +286,8 @@ func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams
 			&i.Branch,
 			&i.CommitAuthor,
 			&i.CommitMessage,
+			&i.TriggerType,
+			&i.GithubDeliveryID,
 			&i.AppName,
 		); err != nil {
 			return nil, err
@@ -242,7 +301,7 @@ func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams
 }
 
 const listDeploymentsByApp = `-- name: ListDeploymentsByApp :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id FROM deployments
 WHERE app_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -278,6 +337,8 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 			&i.Branch,
 			&i.CommitAuthor,
 			&i.CommitMessage,
+			&i.TriggerType,
+			&i.GithubDeliveryID,
 		); err != nil {
 			return nil, err
 		}
@@ -290,7 +351,7 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, arg ListDeploymentsB
 }
 
 const listDeploymentsForRetention = `-- name: ListDeploymentsForRetention :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id FROM deployments
 WHERE deployments.id IN (
     SELECT d.id FROM deployments d
     WHERE d.app_id = $1
@@ -331,6 +392,8 @@ func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeplo
 			&i.Branch,
 			&i.CommitAuthor,
 			&i.CommitMessage,
+			&i.TriggerType,
+			&i.GithubDeliveryID,
 		); err != nil {
 			return nil, err
 		}
@@ -343,7 +406,7 @@ func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeplo
 }
 
 const listRunningDeployments = `-- name: ListRunningDeployments :many
-SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message FROM deployments WHERE status = 'running'
+SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id FROM deployments WHERE status = 'running'
 `
 
 func (q *Queries) ListRunningDeployments(ctx context.Context) ([]Deployment, error) {
@@ -371,6 +434,8 @@ func (q *Queries) ListRunningDeployments(ctx context.Context) ([]Deployment, err
 			&i.Branch,
 			&i.CommitAuthor,
 			&i.CommitMessage,
+			&i.TriggerType,
+			&i.GithubDeliveryID,
 		); err != nil {
 			return nil, err
 		}

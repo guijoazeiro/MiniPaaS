@@ -139,7 +139,7 @@ var appsGitSourceCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s@%s\n  access: %s\n  context: %s\n  dockerfile: %s\n", source.Repository, source.Branch, source.AccessMode, source.BuildContext, source.DockerfilePath)
+		fmt.Printf("%s@%s\n  access: %s\n  auto-deploy: %t\n  context: %s\n  dockerfile: %s\n", source.Repository, source.Branch, source.AccessMode, source.AutoDeploy, source.BuildContext, source.DockerfilePath)
 		return nil
 	},
 }
@@ -197,6 +197,27 @@ var appsDisconnectGitHubCmd = &cobra.Command{
 	},
 }
 
+var appsAutoDeployCmd = &cobra.Command{
+	Use: "auto-deploy <app> <on|off>", Short: "Enable or disable GitHub push deployments", Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var enabled bool
+		switch args[1] {
+		case "on":
+			enabled = true
+		case "off":
+			enabled = false
+		default:
+			return fmt.Errorf("state must be on or off")
+		}
+		source, err := apiClient.SetGitAutoDeploy(args[0], enabled)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("auto-deploy %s for %s@%s\n", args[1], source.Repository, source.Branch)
+		return nil
+	},
+}
+
 func init() {
 	appsConnectGitHubCmd.Flags().StringVar(&gitRepository, "repo", "", "GitHub repository (owner/repository or URL)")
 	appsConnectGitHubCmd.Flags().StringVar(&gitBranch, "branch", "main", "default branch")
@@ -204,5 +225,5 @@ func init() {
 	appsConnectGitHubCmd.Flags().StringVar(&gitDockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to the build context")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitInstallationID, "installation", 0, "GitHub App installation ID for a private repository")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitRepositoryID, "repository-id", 0, "GitHub repository ID exposed to the installation")
-	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd)
+	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd, appsAutoDeployCmd)
 }

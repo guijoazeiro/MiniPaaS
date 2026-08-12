@@ -21,6 +21,10 @@ type GitHubAppSourceService interface {
 	ConfigureGitHubApp(ctx context.Context, appName string, installationID, repositoryID int64, branch, buildContext, dockerfilePath string) (domain.GitSource, error)
 }
 
+type GitAutoDeployService interface {
+	SetAutoDeploy(ctx context.Context, appName string, enabled bool) (domain.GitSource, error)
+}
+
 type gitHubAppSourceRequest struct {
 	InstallationID int64  `json:"installation_id" binding:"required"`
 	RepositoryID   int64  `json:"repository_id" binding:"required"`
@@ -54,13 +58,18 @@ type GitDeploymentService interface {
 }
 
 type GitSourceHandler struct {
-	sources     GitSourceService
-	deployments GitDeploymentService
-	log         *slog.Logger
+	sources         GitSourceService
+	deployments     GitDeploymentService
+	log             *slog.Logger
+	webhooksEnabled bool
 }
 
-func NewGitSourceHandler(sources GitSourceService, deployments GitDeploymentService, log *slog.Logger) *GitSourceHandler {
-	return &GitSourceHandler{sources: sources, deployments: deployments, log: log}
+func NewGitSourceHandler(sources GitSourceService, deployments GitDeploymentService, log *slog.Logger, webhooksEnabled ...bool) *GitSourceHandler {
+	handler := &GitSourceHandler{sources: sources, deployments: deployments, log: log}
+	if len(webhooksEnabled) > 0 {
+		handler.webhooksEnabled = webhooksEnabled[0]
+	}
+	return handler
 }
 
 type gitSourceRequest struct {
@@ -101,6 +110,33 @@ func (h *GitSourceHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+type gitAutoDeployRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+func (h *GitSourceHandler) SetAutoDeploy(c *gin.Context) {
+	var req gitAutoDeployRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+		return
+	}
+	if *req.Enabled && !h.webhooksEnabled {
+		respondError(c, h.log, domain.ErrGitHubWebhookNotConfigured)
+		return
+	}
+	service, ok := h.sources.(GitAutoDeployService)
+	if !ok {
+		respondError(c, h.log, domain.ErrGitHubWebhookNotConfigured)
+		return
+	}
+	source, err := service.SetAutoDeploy(c.Request.Context(), c.Param("name"), *req.Enabled)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, source)
 }
 
 type gitDeployRequest struct {

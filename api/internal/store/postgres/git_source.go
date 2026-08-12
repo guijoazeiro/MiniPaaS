@@ -56,6 +56,29 @@ func (s *GitSourceStore) Delete(ctx context.Context, appID uuid.UUID) error {
 	return nil
 }
 
+func (s *GitSourceStore) SetAutoDeploy(ctx context.Context, appID uuid.UUID, enabled bool) (domain.GitSource, error) {
+	row, err := s.q.SetGitSourceAutoDeploy(ctx, sqlc.SetGitSourceAutoDeployParams{AppID: uuidToPG(appID), AutoDeploy: enabled})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.GitSource{}, domain.ErrGitSourceNotFound
+		}
+		return domain.GitSource{}, fmt.Errorf("store.SetGitSourceAutoDeploy: %w", err)
+	}
+	return toDomainGitSource(row), nil
+}
+
+func (s *GitSourceStore) ListAutoDeployByRepository(ctx context.Context, repositoryID int64) ([]domain.GitSource, error) {
+	rows, err := s.q.ListAutoDeployGitSourcesByRepository(ctx, pgtype.Int8{Int64: repositoryID, Valid: true})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListAutoDeployGitSourcesByRepository: %w", err)
+	}
+	result := make([]domain.GitSource, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, toDomainGitSource(row))
+	}
+	return result, nil
+}
+
 func toDomainGitSource(row sqlc.AppGitSource) domain.GitSource {
 	return domain.GitSource{
 		AppID:                pgToUUID(row.AppID),
@@ -67,6 +90,7 @@ func toDomainGitSource(row sqlc.AppGitSource) domain.GitSource {
 		GitHubInstallationID: int8Pointer(row.GithubInstallationID),
 		GitHubRepositoryID:   int8Pointer(row.GithubRepositoryID),
 		Private:              row.Private,
+		AutoDeploy:           row.AutoDeploy,
 		CreatedAt:            row.CreatedAt.Time,
 		UpdatedAt:            row.UpdatedAt.Time,
 	}
