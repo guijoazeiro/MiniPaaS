@@ -434,7 +434,27 @@ In the GitHub App settings:
 - Set **Webhook URL** to `https://your-public-api.example/integrations/github/webhook`.
 - Set **Webhook secret** to exactly the same value as `GITHUB_WEBHOOK_SECRET`.
 - Keep **Active** enabled and subscribe to the **Push** event.
-- During local development, use a trusted HTTPS tunnel that forwards to `http://localhost:8080`.
+
+During local development, GitHub cannot call `localhost` directly. With the API running on port `8080`, open another terminal and start a temporary HTTPS tunnel using the Wrangler already installed by the dashboard:
+
+```powershell
+cd dashboard
+npx.cmd wrangler tunnel quick-start http://localhost:8080
+```
+
+Wrangler prints a temporary public URL similar to:
+
+```text
+https://random-words.trycloudflare.com
+```
+
+Append the MiniPaaS webhook path and use the result as the GitHub App **Webhook URL**:
+
+```text
+https://random-words.trycloudflare.com/integrations/github/webhook
+```
+
+Keep the tunnel terminal open while testing. A quick-tunnel URL changes whenever the process is restarted, so update the GitHub App Webhook URL after starting a new tunnel. The **Setup URL** remains `http://localhost:8080/integrations/github/callback`, because it is opened by the local browser rather than called by GitHub's servers.
 
 After restarting the API, enable auto-deploy from **Projeto → Configurações → GitHub** or with:
 
