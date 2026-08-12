@@ -40,6 +40,24 @@ export type GitSource = {
   branch: string;
   build_context: string;
   dockerfile_path: string;
+  access_mode: "public" | "github_app";
+  github_installation_id?: number;
+  github_repository_id?: number;
+  private: boolean;
+};
+
+export type GitHubInstallation = {
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  repository_selection: string;
+};
+
+export type GitHubRepository = {
+  id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
 };
 
 export type EnvKey = {
