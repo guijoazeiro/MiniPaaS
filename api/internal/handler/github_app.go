@@ -24,14 +24,19 @@ type GitHubAppHandler struct {
 	service         GitHubAppService
 	dashboardOrigin string
 	log             *slog.Logger
+	webhooksEnabled bool
 }
 
-func NewGitHubAppHandler(service GitHubAppService, dashboardOrigin string, log *slog.Logger) *GitHubAppHandler {
-	return &GitHubAppHandler{service: service, dashboardOrigin: strings.TrimRight(dashboardOrigin, "/"), log: log}
+func NewGitHubAppHandler(service GitHubAppService, dashboardOrigin string, log *slog.Logger, webhooksEnabled ...bool) *GitHubAppHandler {
+	handler := &GitHubAppHandler{service: service, dashboardOrigin: strings.TrimRight(dashboardOrigin, "/"), log: log}
+	if len(webhooksEnabled) > 0 {
+		handler.webhooksEnabled = webhooksEnabled[0]
+	}
+	return handler
 }
 
 func (h *GitHubAppHandler) Status(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"enabled": h.service != nil && h.service.Enabled()})
+	c.JSON(http.StatusOK, gin.H{"enabled": h.service != nil && h.service.Enabled(), "webhooks_enabled": h.webhooksEnabled})
 }
 
 func (h *GitHubAppHandler) InstallURL(c *gin.Context) {

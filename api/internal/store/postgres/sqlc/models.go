@@ -29,24 +29,27 @@ type AppGitSource struct {
 	GithubInstallationID pgtype.Int8        `json:"github_installation_id"`
 	GithubRepositoryID   pgtype.Int8        `json:"github_repository_id"`
 	Private              bool               `json:"private"`
+	AutoDeploy           bool               `json:"auto_deploy"`
 }
 
 type Deployment struct {
-	ID            pgtype.UUID        `json:"id"`
-	AppID         pgtype.UUID        `json:"app_id"`
-	ImageTag      string             `json:"image_tag"`
-	Status        string             `json:"status"`
-	ContainerID   pgtype.Text        `json:"container_id"`
-	Port          pgtype.Int4        `json:"port"`
-	CommitSha     pgtype.Text        `json:"commit_sha"`
-	DurationMs    pgtype.Int4        `json:"duration_ms"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
-	SourceType    string             `json:"source_type"`
-	Repository    pgtype.Text        `json:"repository"`
-	Branch        pgtype.Text        `json:"branch"`
-	CommitAuthor  pgtype.Text        `json:"commit_author"`
-	CommitMessage pgtype.Text        `json:"commit_message"`
+	ID               pgtype.UUID        `json:"id"`
+	AppID            pgtype.UUID        `json:"app_id"`
+	ImageTag         string             `json:"image_tag"`
+	Status           string             `json:"status"`
+	ContainerID      pgtype.Text        `json:"container_id"`
+	Port             pgtype.Int4        `json:"port"`
+	CommitSha        pgtype.Text        `json:"commit_sha"`
+	DurationMs       pgtype.Int4        `json:"duration_ms"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
+	SourceType       string             `json:"source_type"`
+	Repository       pgtype.Text        `json:"repository"`
+	Branch           pgtype.Text        `json:"branch"`
+	CommitAuthor     pgtype.Text        `json:"commit_author"`
+	CommitMessage    pgtype.Text        `json:"commit_message"`
+	TriggerType      string             `json:"trigger_type"`
+	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
 }
 
 type EnvVar struct {
@@ -66,6 +69,17 @@ type GithubInstallation struct {
 	RepositorySelection string             `json:"repository_selection"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GithubWebhookDelivery struct {
+	DeliveryID   string             `json:"delivery_id"`
+	Event        string             `json:"event"`
+	RepositoryID pgtype.Int8        `json:"repository_id"`
+	CommitSha    pgtype.Text        `json:"commit_sha"`
+	Status       string             `json:"status"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
 }
 
 type RollbackHistory struct {

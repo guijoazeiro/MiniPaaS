@@ -165,6 +165,11 @@ func (c *Client) Prepare(ctx context.Context, source domain.GitSource, branch st
 		_ = os.Remove(tarFile.Name())
 		return fail(fmt.Errorf("read repository HEAD: %w", err))
 	}
+	if source.ExpectedCommitSHA != "" && !strings.EqualFold(head.Hash().String(), source.ExpectedCommitSHA) {
+		_ = tarFile.Close()
+		_ = os.Remove(tarFile.Name())
+		return fail(fmt.Errorf("repository branch moved: expected commit %s, got %s", source.ExpectedCommitSHA, head.Hash().String()))
+	}
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
 		_ = tarFile.Close()

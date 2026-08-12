@@ -21,7 +21,7 @@ func (q *Queries) DeleteGitSource(ctx context.Context, appID pgtype.UUID) error 
 }
 
 const getGitSource = `-- name: GetGitSource :one
-SELECT app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private FROM app_git_sources WHERE app_id = $1
+SELECT app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private, auto_deploy FROM app_git_sources WHERE app_id = $1
 `
 
 func (q *Queries) GetGitSource(ctx context.Context, appID pgtype.UUID) (AppGitSource, error) {
@@ -39,6 +39,81 @@ func (q *Queries) GetGitSource(ctx context.Context, appID pgtype.UUID) (AppGitSo
 		&i.GithubInstallationID,
 		&i.GithubRepositoryID,
 		&i.Private,
+		&i.AutoDeploy,
+	)
+	return i, err
+}
+
+const listAutoDeployGitSourcesByRepository = `-- name: ListAutoDeployGitSourcesByRepository :many
+SELECT app_git_sources.app_id, app_git_sources.repository, app_git_sources.branch, app_git_sources.build_context, app_git_sources.dockerfile_path, app_git_sources.created_at, app_git_sources.updated_at, app_git_sources.access_mode, app_git_sources.github_installation_id, app_git_sources.github_repository_id, app_git_sources.private, app_git_sources.auto_deploy
+FROM app_git_sources
+WHERE github_repository_id = $1
+  AND access_mode = 'github_app'
+  AND auto_deploy = true
+ORDER BY app_id
+`
+
+func (q *Queries) ListAutoDeployGitSourcesByRepository(ctx context.Context, githubRepositoryID pgtype.Int8) ([]AppGitSource, error) {
+	rows, err := q.db.Query(ctx, listAutoDeployGitSourcesByRepository, githubRepositoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AppGitSource
+	for rows.Next() {
+		var i AppGitSource
+		if err := rows.Scan(
+			&i.AppID,
+			&i.Repository,
+			&i.Branch,
+			&i.BuildContext,
+			&i.DockerfilePath,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AccessMode,
+			&i.GithubInstallationID,
+			&i.GithubRepositoryID,
+			&i.Private,
+			&i.AutoDeploy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setGitSourceAutoDeploy = `-- name: SetGitSourceAutoDeploy :one
+UPDATE app_git_sources
+SET auto_deploy = $1, updated_at = now()
+WHERE app_id = $2
+RETURNING app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private, auto_deploy
+`
+
+type SetGitSourceAutoDeployParams struct {
+	AutoDeploy bool        `json:"auto_deploy"`
+	AppID      pgtype.UUID `json:"app_id"`
+}
+
+func (q *Queries) SetGitSourceAutoDeploy(ctx context.Context, arg SetGitSourceAutoDeployParams) (AppGitSource, error) {
+	row := q.db.QueryRow(ctx, setGitSourceAutoDeploy, arg.AutoDeploy, arg.AppID)
+	var i AppGitSource
+	err := row.Scan(
+		&i.AppID,
+		&i.Repository,
+		&i.Branch,
+		&i.BuildContext,
+		&i.DockerfilePath,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AccessMode,
+		&i.GithubInstallationID,
+		&i.GithubRepositoryID,
+		&i.Private,
+		&i.AutoDeploy,
 	)
 	return i, err
 }
@@ -55,8 +130,9 @@ ON CONFLICT (app_id) DO UPDATE SET
     github_installation_id = EXCLUDED.github_installation_id,
     github_repository_id = EXCLUDED.github_repository_id,
     private = EXCLUDED.private,
+    auto_deploy = CASE WHEN EXCLUDED.access_mode = 'public' THEN false ELSE app_git_sources.auto_deploy END,
     updated_at = now()
-RETURNING app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private
+RETURNING app_id, repository, branch, build_context, dockerfile_path, created_at, updated_at, access_mode, github_installation_id, github_repository_id, private, auto_deploy
 `
 
 type UpsertGitSourceParams struct {
@@ -96,6 +172,7 @@ func (q *Queries) UpsertGitSource(ctx context.Context, arg UpsertGitSourceParams
 		&i.GithubInstallationID,
 		&i.GithubRepositoryID,
 		&i.Private,
+		&i.AutoDeploy,
 	)
 	return i, err
 }

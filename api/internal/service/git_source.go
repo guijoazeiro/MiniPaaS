@@ -124,6 +124,21 @@ func (s *GitSourceService) Delete(ctx context.Context, appName string) error {
 	return nil
 }
 
+func (s *GitSourceService) SetAutoDeploy(ctx context.Context, appName string, enabled bool) (domain.GitSource, error) {
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	source, err := s.sources.Get(ctx, app.ID)
+	if err != nil {
+		return domain.GitSource{}, err
+	}
+	if enabled && source.AccessMode != domain.GitAccessGitHubApp {
+		return domain.GitSource{}, domain.ErrGitHubAutoDeployRequiresApp
+	}
+	return s.sources.SetAutoDeploy(ctx, app.ID, enabled)
+}
+
 type GitDeploymentService struct {
 	sources      store.GitSourceStore
 	apps         store.AppStore
@@ -157,6 +172,17 @@ func (s *GitDeploymentService) Create(ctx context.Context, appName, branch strin
 	}
 	dep, app, err := s.deployments.CreateGit(ctx, appName, source.Repository, branch)
 	return dep, app, source, err
+}
+
+func (s *GitDeploymentService) CreateTriggered(ctx context.Context, appName string, source domain.GitSource, branch, deliveryID string) (domain.Deployment, domain.App, error) {
+	if branch == "" {
+		branch = source.Branch
+	}
+	branch, err := sourcegit.NormalizeBranch(branch)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, err
+	}
+	return s.deployments.CreateGitTriggered(ctx, appName, source.Repository, branch, domain.DeploymentTriggerWebhook, deliveryID)
 }
 
 func (s *GitDeploymentService) Run(ctx context.Context, dep domain.Deployment, app domain.App, source domain.GitSource, branch string) error {

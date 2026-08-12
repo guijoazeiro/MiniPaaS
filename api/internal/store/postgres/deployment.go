@@ -41,6 +41,18 @@ func (s *DeploymentStore) CreateGit(ctx context.Context, appID uuid.UUID, imageT
 	return toDomainDeployment(row), nil
 }
 
+func (s *DeploymentStore) CreateGitTriggered(ctx context.Context, appID uuid.UUID, imageTag, repository, branch, triggerType, deliveryID string) (domain.Deployment, error) {
+	row, err := s.q.CreateTriggeredGitDeployment(ctx, sqlc.CreateTriggeredGitDeploymentParams{
+		AppID: uuidToPG(appID), ImageTag: imageTag,
+		Repository: pgtype.Text{String: repository, Valid: true}, Branch: pgtype.Text{String: branch, Valid: true},
+		TriggerType: triggerType, GithubDeliveryID: pgtype.Text{String: deliveryID, Valid: deliveryID != ""},
+	})
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("store.CreateTriggeredGitDeployment: %w", err)
+	}
+	return toDomainDeployment(row), nil
+}
+
 func (s *DeploymentStore) UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error {
 	err := s.q.UpdateDeploymentGitMetadata(ctx, sqlc.UpdateDeploymentGitMetadataParams{
 		ID: uuidToPG(id), CommitSha: pgtype.Text{String: commitSHA, Valid: true},
@@ -121,6 +133,7 @@ func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, l
 			DurationMs: row.DurationMs, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
 			SourceType: row.SourceType, Repository: row.Repository, Branch: row.Branch,
 			CommitAuthor: row.CommitAuthor, CommitMessage: row.CommitMessage,
+			TriggerType: row.TriggerType, GithubDeliveryID: row.GithubDeliveryID,
 		})
 		out[i] = domain.DeploymentListItem{Deployment: deployment, AppName: row.AppName}
 	}
@@ -180,20 +193,22 @@ func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status
 
 func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 	d := domain.Deployment{
-		ID:            pgToUUID(row.ID),
-		AppID:         pgToUUID(row.AppID),
-		ImageTag:      row.ImageTag,
-		Status:        domain.DeploymentStatus(row.Status),
-		ContainerID:   pgText(row.ContainerID),
-		Port:          pgInt4(row.Port),
-		CommitSHA:     pgText(row.CommitSha),
-		SourceType:    row.SourceType,
-		Repository:    pgText(row.Repository),
-		Branch:        pgText(row.Branch),
-		CommitAuthor:  pgText(row.CommitAuthor),
-		CommitMessage: pgText(row.CommitMessage),
-		DurationMs:    pgInt4(row.DurationMs),
-		CreatedAt:     row.CreatedAt.Time,
+		ID:               pgToUUID(row.ID),
+		AppID:            pgToUUID(row.AppID),
+		ImageTag:         row.ImageTag,
+		Status:           domain.DeploymentStatus(row.Status),
+		ContainerID:      pgText(row.ContainerID),
+		Port:             pgInt4(row.Port),
+		CommitSHA:        pgText(row.CommitSha),
+		SourceType:       row.SourceType,
+		Repository:       pgText(row.Repository),
+		Branch:           pgText(row.Branch),
+		CommitAuthor:     pgText(row.CommitAuthor),
+		CommitMessage:    pgText(row.CommitMessage),
+		TriggerType:      row.TriggerType,
+		GitHubDeliveryID: pgText(row.GithubDeliveryID),
+		DurationMs:       pgInt4(row.DurationMs),
+		CreatedAt:        row.CreatedAt.Time,
 	}
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time

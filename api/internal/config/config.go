@@ -33,6 +33,7 @@ type Config struct {
 	GitHubAppSlug           string
 	GitHubAppPrivateKeyPath string
 	GitHubAPIURL            string
+	GitHubWebhookSecret     string
 	DashboardOrigin         string
 	LogLevel                string
 }
@@ -124,6 +125,7 @@ func Load() (*Config, error) {
 		GitHubAppSlug:           githubAppSlug,
 		GitHubAppPrivateKeyPath: githubAppKeyPath,
 		GitHubAPIURL:            env("GITHUB_API_URL", "https://api.github.com"),
+		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
 		DashboardOrigin:         env("DASHBOARD_ORIGIN", "http://localhost:3000"),
 		LogLevel:                env("LOG_LEVEL", "info"),
 	}, nil
