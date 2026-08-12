@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/guijoazeiro/MiniPaaS/cli/internal/api"
 
@@ -9,6 +10,7 @@ import (
 )
 
 var gitRepository, gitBranch, gitContext, gitDockerfile string
+var gitInstallationID, gitRepositoryID int64
 
 var appsCmd = &cobra.Command{
 	Use:   "apps",
@@ -105,12 +107,22 @@ var appsInfoCmd = &cobra.Command{
 }
 
 var appsConnectGitHubCmd = &cobra.Command{
-	Use: "connect-github <app>", Short: "Connect a public GitHub repository to an app", Args: cobra.ExactArgs(1),
+	Use: "connect-github <app>", Short: "Connect a public or GitHub App repository to an app", Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if gitRepository == "" {
+		private := gitInstallationID > 0 || gitRepositoryID > 0
+		if private && (gitInstallationID <= 0 || gitRepositoryID <= 0) {
+			return fmt.Errorf("--installation and --repository-id must be used together")
+		}
+		if !private && gitRepository == "" {
 			return fmt.Errorf("--repo is required")
 		}
-		source, err := apiClient.ConfigureGitSource(args[0], api.GitSource{Repository: gitRepository, Branch: gitBranch, BuildContext: gitContext, DockerfilePath: gitDockerfile})
+		var source *api.GitSource
+		var err error
+		if private {
+			source, err = apiClient.ConfigureGitHubAppSource(args[0], gitInstallationID, gitRepositoryID, gitBranch, gitContext, gitDockerfile)
+		} else {
+			source, err = apiClient.ConfigureGitSource(args[0], api.GitSource{Repository: gitRepository, Branch: gitBranch, BuildContext: gitContext, DockerfilePath: gitDockerfile})
+		}
 		if err != nil {
 			return err
 		}
@@ -127,7 +139,49 @@ var appsGitSourceCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s@%s\n  context: %s\n  dockerfile: %s\n", source.Repository, source.Branch, source.BuildContext, source.DockerfilePath)
+		fmt.Printf("%s@%s\n  access: %s\n  context: %s\n  dockerfile: %s\n", source.Repository, source.Branch, source.AccessMode, source.BuildContext, source.DockerfilePath)
+		return nil
+	},
+}
+
+var appsGitHubInstallationsCmd = &cobra.Command{
+	Use: "github-installations", Short: "List GitHub App installations available to MiniPaaS",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		installations, err := apiClient.ListGitHubInstallations()
+		if err != nil {
+			return err
+		}
+		if len(installations) == 0 {
+			fmt.Println("no GitHub App installations; connect one from the dashboard first")
+			return nil
+		}
+		fmt.Printf("%-14s  %-28s  %-14s  %s\n", "INSTALLATION", "ACCOUNT", "TYPE", "ACCESS")
+		for _, installation := range installations {
+			fmt.Printf("%-14d  %-28s  %-14s  %s\n", installation.InstallationID, installation.AccountLogin, installation.AccountType, installation.RepositorySelection)
+		}
+		return nil
+	},
+}
+
+var appsGitHubRepositoriesCmd = &cobra.Command{
+	Use: "github-repositories <installation-id>", Short: "List repositories available to a GitHub App installation", Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		installationID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || installationID <= 0 {
+			return fmt.Errorf("installation-id must be a positive integer")
+		}
+		repositories, err := apiClient.ListGitHubRepositories(installationID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%-14s  %-42s  %-9s  %s\n", "REPOSITORY", "NAME", "VISIBILITY", "DEFAULT BRANCH")
+		for _, repository := range repositories {
+			visibility := "public"
+			if repository.Private {
+				visibility = "private"
+			}
+			fmt.Printf("%-14d  %-42s  %-9s  %s\n", repository.ID, repository.FullName, visibility, repository.DefaultBranch)
+		}
 		return nil
 	},
 }
@@ -148,5 +202,7 @@ func init() {
 	appsConnectGitHubCmd.Flags().StringVar(&gitBranch, "branch", "main", "default branch")
 	appsConnectGitHubCmd.Flags().StringVar(&gitContext, "context", ".", "build context relative to the repository root")
 	appsConnectGitHubCmd.Flags().StringVar(&gitDockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to the build context")
-	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd)
+	appsConnectGitHubCmd.Flags().Int64Var(&gitInstallationID, "installation", 0, "GitHub App installation ID for a private repository")
+	appsConnectGitHubCmd.Flags().Int64Var(&gitRepositoryID, "repository-id", 0, "GitHub repository ID exposed to the installation")
+	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd)
 }
