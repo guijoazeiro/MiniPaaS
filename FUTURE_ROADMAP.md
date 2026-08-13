@@ -117,6 +117,10 @@ Phase 12.2 implements an on-demand metrics snapshot from Docker and deployment h
 
 The initial metrics scope remains lightweight; Prometheus-compatible export can be added later.
 
+### Real-time metrics
+
+Phase 12.3 adds a shared Docker stats WebSocket per active container, automatic client reconnection, and a dedicated dashboard page with rolling CPU, memory, network, and disk charts. Long-term time-series persistence and alerting remain future work.
+
 ## Cross-cutting security and reliability
 
 These controls should be implemented alongside the phases above rather than postponed to a final security pass:

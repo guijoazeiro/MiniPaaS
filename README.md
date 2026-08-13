@@ -25,6 +25,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
 | 12.1 | Custom domains | 🚧 implemented, awaiting DNS/HTTPS validation |
 | 12.2 | Operational metrics | 🚧 implemented, awaiting manual validation |
+| 12.3 | Real-time metrics stream | 🚧 implemented, awaiting manual validation |
 
 ## Stack
 
@@ -566,6 +567,16 @@ GET /apps/:name/metrics
 ```
 
 The response includes current container CPU and memory usage, uptime, restart count, deployment success/failure summary, average deployment duration, and recent health-check failures. The dashboard renders these values under **Visão geral → Métricas operacionais**. Metrics are collected directly from Docker when requested; no Prometheus service or additional database migration is required.
+
+### Real-time metrics (Phase 12.3)
+
+The dedicated **Métricas** page opens an authenticated WebSocket stream for the selected application:
+
+```text
+GET /apps/:name/metrics/stream
+```
+
+The backend shares one Docker stats stream per active container between connected viewers. The dashboard keeps a rolling window of samples for CPU, memory, network, and disk charts, reconnects automatically, and falls back to the snapshot endpoint when the stream is unavailable.
 
 ## Project layout
 
