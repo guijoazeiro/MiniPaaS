@@ -50,6 +50,9 @@ type Deployment struct {
 	CommitMessage    string `json:"commit_message,omitempty"`
 	TriggerType      string `json:"trigger_type,omitempty"`
 	GitHubDeliveryID string `json:"github_delivery_id,omitempty"`
+	Attempt          int    `json:"attempt,omitempty"`
+	RetryOf          string `json:"retry_of,omitempty"`
+	CancelRequested  bool   `json:"cancel_requested,omitempty"`
 }
 
 type DeploymentLog struct {
@@ -237,6 +240,18 @@ func (c *Client) GetDeployment(app, id string) (*Deployment, error) {
 	if err := c.doJSON(http.MethodGet, "/apps/"+app+"/deployments/"+id, nil, "", &out); err != nil {
 		return nil, err
 	}
+	return &out, nil
+}
+
+func (c *Client) RetryDeployment(app, id string) (*Deployment, error) {
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/retry", nil, "", &out); err != nil { return nil, err }
+	return &out, nil
+}
+
+func (c *Client) CancelDeployment(app, id string) (*Deployment, error) {
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/cancel", nil, "", &out); err != nil { return nil, err }
 	return &out, nil
 }
 
