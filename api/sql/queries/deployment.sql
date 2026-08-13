@@ -13,6 +13,11 @@ INSERT INTO deployments (app_id, image_tag, source_type, repository, branch, tri
 VALUES (@app_id, @image_tag, 'git', @repository, @branch, @trigger_type, @github_delivery_id)
 RETURNING *;
 
+-- name: CreateRetryGitDeployment :one
+INSERT INTO deployments (app_id, image_tag, source_type, repository, branch, attempt, retry_of)
+VALUES (@app_id, @image_tag, 'git', @repository, @branch, @attempt, @retry_of)
+RETURNING *;
+
 -- name: UpdateDeploymentGitMetadata :exec
 UPDATE deployments
 SET commit_sha = @commit_sha,
@@ -67,6 +72,17 @@ UPDATE deployments
 SET status = @status, finished_at = now()
 WHERE id = @id;
 
+-- name: RequestDeploymentCancel :one
+UPDATE deployments
+SET status = 'cancel_requested', cancel_requested = true
+WHERE id = @id AND status IN ('pending', 'building', 'cancel_requested')
+RETURNING *;
+
+-- name: MarkDeploymentCancelled :exec
+UPDATE deployments
+SET status = 'cancelled', cancel_requested = true, finished_at = now()
+WHERE id = @id AND status IN ('pending', 'building', 'cancel_requested');
+
 -- name: ListRunningDeployments :many
 SELECT * FROM deployments WHERE status = 'running';
 
@@ -80,3 +96,15 @@ WHERE deployments.id IN (
 )
 AND status NOT IN ('running', 'pending', 'building')
 ORDER BY created_at DESC;
+
+-- name: CreateDeploymentLog :one
+INSERT INTO deployment_logs (deployment_id, stage, stream, message)
+VALUES (@deployment_id, @stage, @stream, @message)
+RETURNING *;
+
+-- name: ListDeploymentLogs :many
+SELECT * FROM deployment_logs
+WHERE deployment_id = @deployment_id
+  AND id > @after_id
+ORDER BY id ASC
+LIMIT @lim;

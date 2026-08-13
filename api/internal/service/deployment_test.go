@@ -72,6 +72,19 @@ func (s *rollbackDeploymentStore) UpdateStatus(_ context.Context, _ uuid.UUID, s
 	return nil
 }
 
+func (s *rollbackDeploymentStore) RequestCancel(_ context.Context, id uuid.UUID) (domain.Deployment, error) {
+	s.target.ID = id
+	s.target.Status = domain.DeploymentStatusCancelRequested
+	s.target.CancelRequested = true
+	return s.target, nil
+}
+
+func (s *rollbackDeploymentStore) MarkCancelled(_ context.Context, _ uuid.UUID) error {
+	s.target.Status = domain.DeploymentStatusCancelled
+	s.target.CancelRequested = true
+	return nil
+}
+
 type rollbackAppStore struct {
 	app      domain.App
 	statuses []domain.AppStatus
@@ -126,6 +139,39 @@ func TestFailedBuildKeepsActiveAppRunning(t *testing.T) {
 	}
 	if got := deps.statuses[len(deps.statuses)-1]; got != domain.DeploymentStatusFailed {
 		t.Fatalf("last deployment status = %s", got)
+	}
+}
+
+func TestCancelPendingDeploymentMarksItCancelled(t *testing.T) {
+	depID := uuid.New()
+	appID := uuid.New()
+	deps := &rollbackDeploymentStore{target: domain.Deployment{ID: depID, AppID: appID, Status: domain.DeploymentStatusPending}}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app"}}
+	svc := newRollbackService(deps, apps, &rollbackDocker{}, &rollbackEnv{})
+
+	got, err := svc.Cancel(context.Background(), depID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.DeploymentStatusCancelled || !got.CancelRequested {
+		t.Fatalf("deployment = %+v", got)
+	}
+}
+
+func TestCancelledDeploymentDoesNotStartBuild(t *testing.T) {
+	appID := uuid.New()
+	depID := uuid.New()
+	deps := &rollbackDeploymentStore{target: domain.Deployment{ID: depID, AppID: appID, Status: domain.DeploymentStatusCancelRequested, CancelRequested: true}}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app"}}
+	dk := &rollbackDocker{}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	err := svc.RunBuild(context.Background(), domain.Deployment{ID: depID, AppID: appID, ImageTag: "app:new"}, apps.app, strings.NewReader("tar"))
+	if !errors.Is(err, domain.ErrDeploymentCancelled) {
+		t.Fatalf("RunBuild() error = %v", err)
+	}
+	if dk.mutations != 0 {
+		t.Fatalf("cancelled deployment caused %d Docker mutations", dk.mutations)
 	}
 }
 

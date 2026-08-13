@@ -53,6 +53,18 @@ func (s *DeploymentStore) CreateGitTriggered(ctx context.Context, appID uuid.UUI
 	return toDomainDeployment(row), nil
 }
 
+func (s *DeploymentStore) CreateGitRetry(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string, retryOf uuid.UUID, attempt int) (domain.Deployment, error) {
+	row, err := s.q.CreateRetryGitDeployment(ctx, sqlc.CreateRetryGitDeploymentParams{
+		AppID: uuidToPG(appID), ImageTag: imageTag,
+		Repository: pgtype.Text{String: repository, Valid: true}, Branch: pgtype.Text{String: branch, Valid: true},
+		Attempt: int32(attempt), RetryOf: uuidToPG(retryOf),
+	})
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("store.CreateGitRetryDeployment: %w", err)
+	}
+	return toDomainDeployment(row), nil
+}
+
 func (s *DeploymentStore) UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error {
 	err := s.q.UpdateDeploymentGitMetadata(ctx, sqlc.UpdateDeploymentGitMetadataParams{
 		ID: uuidToPG(id), CommitSha: pgtype.Text{String: commitSHA, Valid: true},
@@ -134,6 +146,7 @@ func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, l
 			SourceType: row.SourceType, Repository: row.Repository, Branch: row.Branch,
 			CommitAuthor: row.CommitAuthor, CommitMessage: row.CommitMessage,
 			TriggerType: row.TriggerType, GithubDeliveryID: row.GithubDeliveryID,
+			Attempt: row.Attempt, RetryOf: row.RetryOf, CancelRequested: row.CancelRequested,
 		})
 		out[i] = domain.DeploymentListItem{Deployment: deployment, AppName: row.AppName}
 	}
@@ -191,6 +204,22 @@ func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status
 	return nil
 }
 
+func (s *DeploymentStore) RequestCancel(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
+	row, err := s.q.RequestDeploymentCancel(ctx, uuidToPG(id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { return domain.Deployment{}, domain.ErrDeploymentNotCancellable }
+		return domain.Deployment{}, fmt.Errorf("store.RequestDeploymentCancel: %w", err)
+	}
+	return toDomainDeployment(row), nil
+}
+
+func (s *DeploymentStore) MarkCancelled(ctx context.Context, id uuid.UUID) error {
+	if err := s.q.MarkDeploymentCancelled(ctx, uuidToPG(id)); err != nil {
+		return fmt.Errorf("store.MarkDeploymentCancelled: %w", err)
+	}
+	return nil
+}
+
 func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 	d := domain.Deployment{
 		ID:               pgToUUID(row.ID),
@@ -207,9 +236,12 @@ func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 		CommitMessage:    pgText(row.CommitMessage),
 		TriggerType:      row.TriggerType,
 		GitHubDeliveryID: pgText(row.GithubDeliveryID),
+		Attempt:          int(row.Attempt),
+		CancelRequested:  row.CancelRequested,
 		DurationMs:       pgInt4(row.DurationMs),
 		CreatedAt:        row.CreatedAt.Time,
 	}
+	if row.RetryOf.Valid { retry := pgToUUID(row.RetryOf); d.RetryOf = &retry }
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time
 		d.FinishedAt = &t

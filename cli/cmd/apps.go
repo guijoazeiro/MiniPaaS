@@ -106,6 +106,26 @@ var appsInfoCmd = &cobra.Command{
 	},
 }
 
+var appsRetryCmd = &cobra.Command{
+	Use: "retry <app> <deployment-id>", Short: "Retry a failed Git deployment", Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dep, err := apiClient.RetryDeployment(args[0], args[1])
+		if err != nil { return err }
+		fmt.Printf("retry started: %s  status=%s  attempt=%d\n", dep.ID, dep.Status, dep.Attempt)
+		return nil
+	},
+}
+
+var appsCancelCmd = &cobra.Command{
+	Use: "cancel <app> <deployment-id>", Short: "Cancel a pending or building deployment", Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dep, err := apiClient.CancelDeployment(args[0], args[1])
+		if err != nil { return err }
+		fmt.Printf("cancel requested: %s  status=%s\n", dep.ID, dep.Status)
+		return nil
+	},
+}
+
 var appsConnectGitHubCmd = &cobra.Command{
 	Use: "connect-github <app>", Short: "Connect a public or GitHub App repository to an app", Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -225,5 +245,5 @@ func init() {
 	appsConnectGitHubCmd.Flags().StringVar(&gitDockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to the build context")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitInstallationID, "installation", 0, "GitHub App installation ID for a private repository")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitRepositoryID, "repository-id", 0, "GitHub repository ID exposed to the installation")
-	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd, appsAutoDeployCmd)
+	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsRetryCmd, appsCancelCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd, appsAutoDeployCmd)
 }

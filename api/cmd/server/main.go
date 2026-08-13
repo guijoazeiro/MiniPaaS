@@ -72,6 +72,7 @@ func main() {
 	q := sqlc.New(pool)
 	appStore := postgres.NewAppStore(q)
 	depStore := postgres.NewDeploymentStore(q)
+	depLogStore := postgres.NewDeploymentLogStore(q)
 	userStore := postgres.NewUserStore(q)
 	envStore := postgres.NewEnvStore(q)
 	rollbackStore := postgres.NewRollbackStore(q)
@@ -96,7 +97,7 @@ func main() {
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, depLogStore)
 	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
 	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
 	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)
@@ -110,7 +111,7 @@ func main() {
 	if !webhooksEnabled {
 		webhookSecret = ""
 	}
-	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log)
+	healthChecker := health.New(depStore, appStore, dockerCli, cfg.HealthCheckInterval, log, depLogStore)
 
 	if err := authSvc.SeedAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
 		log.Error("seed admin", "err", err)
@@ -119,7 +120,7 @@ func main() {
 
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
-	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize)
+	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize, depLogStore, gitDepSvc)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
@@ -157,6 +158,9 @@ func main() {
 	auth.POST("/apps/:name/deployments/git", gitH.Deploy)
 	auth.GET("/apps/:name/deployments", depH.List)
 	auth.GET("/apps/:name/deployments/:id", depH.Get)
+	auth.GET("/apps/:name/deployments/:id/logs", depH.Logs)
+	auth.POST("/apps/:name/deployments/:id/cancel", depH.Cancel)
+	auth.POST("/apps/:name/deployments/:id/retry", depH.Retry)
 	auth.POST("/apps/:name/rollback", depH.Rollback)
 	auth.PUT("/apps/:name/source/git", gitH.Configure)
 	auth.PUT("/apps/:name/source/github-app", gitH.ConfigureGitHubApp)

@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	logsFollow bool
-	logsTail   string
+	logsFollow     bool
+	logsTail       string
+	logsDeployment string
 )
 
 var logsCmd = &cobra.Command{
@@ -26,6 +27,16 @@ var logsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app := args[0]
+		if logsDeployment != "" {
+			items, err := apiClient.ListDeploymentLogs(app, logsDeployment, 0, 1000)
+			if err != nil {
+				return err
+			}
+			for _, item := range items {
+				fmt.Fprintf(os.Stdout, "[%s] %s\n", item.Stage, item.Message)
+			}
+			return nil
+		}
 		wsURL, err := buildWSURL(apiClient.Host(), app, logsTail, logsFollow)
 		if err != nil {
 			return err
@@ -118,4 +129,5 @@ func buildWSURL(host, app, tail string, follow bool) (string, error) {
 func init() {
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "stream continuously until Ctrl+C")
 	logsCmd.Flags().StringVar(&logsTail, "tail", "100", "number of trailing lines to fetch (or 'all')")
+	logsCmd.Flags().StringVar(&logsDeployment, "deployment", "", "show persisted build logs for a deployment ID")
 }

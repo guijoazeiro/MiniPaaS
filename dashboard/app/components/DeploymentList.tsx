@@ -5,9 +5,14 @@ type Props = {
   deployments: Deployment[];
   rollingBackID: string;
   onRollback: (deploymentID: string) => void;
+  onViewLogs: (deploymentID: string) => void;
+  retryingID: string;
+  cancellingID: string;
+  onRetry: (deploymentID: string) => void;
+  onCancel: (deploymentID: string) => void;
 };
 
-export function DeploymentList({ deployments, rollingBackID, onRollback }: Props) {
+export function DeploymentList({ deployments, rollingBackID, onRollback, onViewLogs, retryingID, cancellingID, onRetry, onCancel }: Props) {
   return (
     <section id="deployments" className="panel glass">
       <div className="section-heading"><div><p className="eyebrow">HISTÓRICO</p><h2>Deploys recentes</h2></div><span className="count">{deployments.length}</span></div>
@@ -21,10 +26,15 @@ export function DeploymentList({ deployments, rollingBackID, onRollback }: Props
               {deployment.commit_message && <small className="commit-message">{deployment.commit_message.split("\n")[0]}</small>}
               <small>{formatTime(deployment.created_at)} · {formatDuration(deployment.duration_ms)}{deployment.port ? ` · porta ${deployment.port}` : ""}</small>
             </div>
-            <span className={`status-pill compact ${deployment.status}`}><i />{stateLabel(deployment.status)}</span>
-            {["superseded", "rolled_back", "stopped"].includes(deployment.status) && (
-              <button className="text-button" onClick={() => onRollback(deployment.id)} disabled={Boolean(rollingBackID)}>{rollingBackID === deployment.id ? "Revertendo…" : deployment.status === "stopped" ? "Reativar" : "Rollback"}</button>
-            )}
+            <div className="deployment-actions">
+              <span className={`status-pill compact ${deployment.status}`}><i />{stateLabel(deployment.status)}</span>
+              <button className="text-button" onClick={() => onViewLogs(deployment.id)}>Logs de build</button>
+              {deployment.source_type === "git" && (deployment.status === "failed" || deployment.status === "cancelled") ? <button className="text-button" onClick={() => onRetry(deployment.id)} disabled={Boolean(retryingID || cancellingID)}>{retryingID === deployment.id ? "Repetindo…" : "Retry"}</button> : null}
+              {["pending", "building", "cancel_requested"].includes(deployment.status) ? <button className="text-button danger" onClick={() => onCancel(deployment.id)} disabled={Boolean(retryingID || cancellingID)}>{cancellingID === deployment.id ? "Cancelando…" : "Cancelar"}</button> : null}
+              {["superseded", "rolled_back", "stopped"].includes(deployment.status) && (
+                <button className="text-button" onClick={() => onRollback(deployment.id)} disabled={Boolean(rollingBackID)}>{rollingBackID === deployment.id ? "Revertendo…" : deployment.status === "stopped" ? "Reativar" : "Rollback"}</button>
+              )}
+            </div>
           </article>
         ))}
       </div>

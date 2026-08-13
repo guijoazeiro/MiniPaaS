@@ -51,6 +51,11 @@ type DeploymentStore interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeploymentStatus) error
 }
 
+type DeploymentLogStore interface {
+	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
+	List(ctx context.Context, deploymentID uuid.UUID, afterID int64, limit int) ([]domain.DeploymentLog, error)
+}
+
 type GitDeploymentStore interface {
 	CreateGit(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string) (domain.Deployment, error)
 	UpdateGitMetadata(ctx context.Context, id uuid.UUID, commitSHA, author, message, branch string) error
@@ -58,6 +63,15 @@ type GitDeploymentStore interface {
 
 type TriggeredGitDeploymentStore interface {
 	CreateGitTriggered(ctx context.Context, appID uuid.UUID, imageTag, repository, branch, triggerType, deliveryID string) (domain.Deployment, error)
+}
+
+type GitRetryDeploymentStore interface {
+	CreateGitRetry(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string, retryOf uuid.UUID, attempt int) (domain.Deployment, error)
+}
+
+type DeploymentCancellationStore interface {
+	RequestCancel(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
+	MarkCancelled(ctx context.Context, id uuid.UUID) error
 }
 
 type GitSourceStore interface {

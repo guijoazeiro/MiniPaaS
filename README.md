@@ -316,9 +316,12 @@ PUT    /apps/:name/env/:key           { value } → 204                (AES-256-
 DELETE /apps/:name/env/:key           → 204
 
 POST   /apps/:name/rollback           { deployment_id } → Deployment (restored)
+POST   /apps/:name/deployments/:id/retry  → Deployment (Git deployment only)
+POST   /apps/:name/deployments/:id/cancel → Deployment (pending/building only)
 
 WS     /apps/:name/logs?follow=true&tail=100     (active deployment, or latest failed deployment with logs)
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
+GET    /apps/:name/deployments/:id/logs?after=0&limit=500 (persisted build events)
 ```
 
 Rollback is synchronous: the API responds after Docker starts the selected image and Caddy updates its route.
@@ -327,6 +330,8 @@ Deployment status transitions:
 
 ```
 pending → building → running    (happy path)
+pending → cancel_requested → cancelled
+building → cancel_requested → cancelled
                    ↘ failed     (build or start failed)
 running           → superseded  (replaced by a newer deploy)
                   → rolled_back (intentional rollback — phase 5)
@@ -354,6 +359,8 @@ minip login                            # host + username + password → OS user 
 minip apps create <name>
 minip apps list
 minip apps info <name>                 # status + container state + public URL + recent deployments
+minip apps retry <name> <deployment-id> # retry a failed/cancelled Git deployment
+minip apps cancel <name> <deployment-id> # cancel a pending/building deployment
 minip apps connect-github <name> --repo owner/repository
 minip apps connect-github <name> --repo owner/repository --branch main --context services/api --dockerfile Dockerfile
 minip apps github-installations
@@ -434,7 +441,27 @@ In the GitHub App settings:
 - Set **Webhook URL** to `https://your-public-api.example/integrations/github/webhook`.
 - Set **Webhook secret** to exactly the same value as `GITHUB_WEBHOOK_SECRET`.
 - Keep **Active** enabled and subscribe to the **Push** event.
-- During local development, use a trusted HTTPS tunnel that forwards to `http://localhost:8080`.
+
+During local development, GitHub cannot call `localhost` directly. With the API running on port `8080`, open another terminal and start a temporary HTTPS tunnel using the Wrangler already installed by the dashboard:
+
+```powershell
+cd dashboard
+npx.cmd wrangler tunnel quick-start http://localhost:8080
+```
+
+Wrangler prints a temporary public URL similar to:
+
+```text
+https://random-words.trycloudflare.com
+```
+
+Append the MiniPaaS webhook path and use the result as the GitHub App **Webhook URL**:
+
+```text
+https://random-words.trycloudflare.com/integrations/github/webhook
+```
+
+Keep the tunnel terminal open while testing. A quick-tunnel URL changes whenever the process is restarted, so update the GitHub App Webhook URL after starting a new tunnel. The **Setup URL** remains `http://localhost:8080/integrations/github/callback`, because it is opened by the local browser rather than called by GitHub's servers.
 
 After restarting the API, enable auto-deploy from **Projeto → Configurações → GitHub** or with:
 
@@ -443,6 +470,42 @@ After restarting the API, enable auto-deploy from **Projeto → Configurações 
 ```
 
 MiniPaaS validates `X-Hub-Signature-256` with HMAC-SHA256 before processing the body, deduplicates deliveries using `X-GitHub-Delivery`, and only starts a deployment when repository, installation, and branch all match. Deleting a branch, pushing another branch, or replaying the same delivery does not create another deployment. Releases created from a push expose `trigger_type=webhook` and their GitHub delivery ID.
+
+### Persistent build logs (Phase 10.2)
+
+Each deployment now records ordered build events in PostgreSQL. Events include the source clone, Docker build output, container start, health-check handoff, route publication, cleanup, and failures. Runtime logs remain available through the existing WebSocket stream; build history is independent and can be opened after a deployment has finished.
+
+The API endpoint is:
+
+```text
+GET /apps/:name/deployments/:id/logs?after=0&limit=500
+```
+
+In the dashboard, open **Deployments → Logs de build** for a release. The CLI exposes the same history without starting a live stream:
+
+```powershell
+.\minip.exe logs hello --deployment <deployment-id>
+```
+
+Apply migration 010 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
+### Retry and cancellation (Phase 10.3)
+
+Deployments can be cancelled while they are pending or building. Cancellation is persisted, interrupts the active clone/build context when the API process is running, and is finalized as `cancelled` without marking the application as failed. A deployment that is already running should be stopped through the existing application stop action.
+
+Retries create a new deployment linked to the previous one through `retry_of` and increment `attempt`. They are currently available for Git deployments because the configured repository can be cloned again; manual tar uploads are not retained as rebuild artifacts.
+
+Apply migration 011 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
 
 ## Project layout
 

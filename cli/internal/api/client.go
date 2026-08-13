@@ -50,6 +50,18 @@ type Deployment struct {
 	CommitMessage    string `json:"commit_message,omitempty"`
 	TriggerType      string `json:"trigger_type,omitempty"`
 	GitHubDeliveryID string `json:"github_delivery_id,omitempty"`
+	Attempt          int    `json:"attempt,omitempty"`
+	RetryOf          string `json:"retry_of,omitempty"`
+	CancelRequested  bool   `json:"cancel_requested,omitempty"`
+}
+
+type DeploymentLog struct {
+	ID           int64  `json:"id"`
+	DeploymentID string `json:"deployment_id"`
+	Stage        string `json:"stage"`
+	Stream       string `json:"stream"`
+	Message      string `json:"message"`
+	CreatedAt    string `json:"created_at"`
 }
 
 type GitSource struct {
@@ -229,6 +241,27 @@ func (c *Client) GetDeployment(app, id string) (*Deployment, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) RetryDeployment(app, id string) (*Deployment, error) {
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/retry", nil, "", &out); err != nil { return nil, err }
+	return &out, nil
+}
+
+func (c *Client) CancelDeployment(app, id string) (*Deployment, error) {
+	var out Deployment
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/cancel", nil, "", &out); err != nil { return nil, err }
+	return &out, nil
+}
+
+func (c *Client) ListDeploymentLogs(app, id string, after, limit int64) ([]DeploymentLog, error) {
+	path := fmt.Sprintf("/apps/%s/deployments/%s/logs?after=%d&limit=%d", app, id, after, limit)
+	var out []DeploymentLog
+	if err := c.doJSON(http.MethodGet, path, nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) doJSON(method, path string, body io.Reader, contentType string, out any) error {

@@ -18,17 +18,24 @@ type ContainerInspector interface {
 	InspectContainer(ctx context.Context, id string) (docker.ContainerState, error)
 }
 
+type DeploymentLogWriter interface {
+	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
+}
+
 type Checker struct {
 	deps     store.DeploymentStore
 	apps     store.AppStore
 	docker   ContainerInspector
 	interval time.Duration
 	log      *slog.Logger
+	logs     DeploymentLogWriter
 	wg       sync.WaitGroup
 }
 
-func New(deps store.DeploymentStore, apps store.AppStore, docker ContainerInspector, interval time.Duration, log *slog.Logger) *Checker {
-	return &Checker{deps: deps, apps: apps, docker: docker, interval: interval, log: log}
+func New(deps store.DeploymentStore, apps store.AppStore, docker ContainerInspector, interval time.Duration, log *slog.Logger, logs ...DeploymentLogWriter) *Checker {
+	var writer DeploymentLogWriter
+	if len(logs) > 0 { writer = logs[0] }
+	return &Checker{deps: deps, apps: apps, docker: docker, interval: interval, log: log, logs: writer}
 }
 
 func (c *Checker) Start(ctx context.Context) {
@@ -112,6 +119,7 @@ func (c *Checker) checkDeployment(ctx context.Context, dep domain.Deployment) {
 	if state.Status != "exited" && state.Status != "dead" && state.Status != "missing" {
 		return
 	}
+	c.event(ctx, dep.ID, "health_check", "stderr", "Container terminou com estado: "+state.Status)
 	c.markFailed(ctx, dep)
 }
 
@@ -124,4 +132,11 @@ func (c *Checker) markFailed(ctx context.Context, dep domain.Deployment) {
 		c.log.Error("health: mark app failed", "app", dep.AppID, "err", err)
 	}
 	c.log.Warn("health: container unhealthy", "deployment", dep.ID, "container", dep.ContainerID)
+}
+
+func (c *Checker) event(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) {
+	if c.logs == nil { return }
+	if _, err := c.logs.Append(ctx, deploymentID, stage, stream, message); err != nil {
+		c.log.Warn("persist deployment log", "deployment", deploymentID, "err", err)
+	}
 }

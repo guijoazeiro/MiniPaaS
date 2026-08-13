@@ -50,6 +50,18 @@ type Deployment struct {
 	CommitMessage    pgtype.Text        `json:"commit_message"`
 	TriggerType      string             `json:"trigger_type"`
 	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
+	Attempt          int32              `json:"attempt"`
+	RetryOf          pgtype.UUID        `json:"retry_of"`
+	CancelRequested  bool               `json:"cancel_requested"`
+}
+
+type DeploymentLog struct {
+	ID           int64              `json:"id"`
+	DeploymentID pgtype.UUID        `json:"deployment_id"`
+	Stage        string             `json:"stage"`
+	Stream       string             `json:"stream"`
+	Message      string             `json:"message"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type EnvVar struct {
