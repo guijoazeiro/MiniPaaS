@@ -67,6 +67,38 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 	return i, err
 }
 
+const createDeploymentLog = `-- name: CreateDeploymentLog :one
+INSERT INTO deployment_logs (deployment_id, stage, stream, message)
+VALUES ($1, $2, $3, $4)
+RETURNING id, deployment_id, stage, stream, message, created_at
+`
+
+type CreateDeploymentLogParams struct {
+	DeploymentID pgtype.UUID `json:"deployment_id"`
+	Stage        string      `json:"stage"`
+	Stream       string      `json:"stream"`
+	Message      string      `json:"message"`
+}
+
+func (q *Queries) CreateDeploymentLog(ctx context.Context, arg CreateDeploymentLogParams) (DeploymentLog, error) {
+	row := q.db.QueryRow(ctx, createDeploymentLog,
+		arg.DeploymentID,
+		arg.Stage,
+		arg.Stream,
+		arg.Message,
+	)
+	var i DeploymentLog
+	err := row.Scan(
+		&i.ID,
+		&i.DeploymentID,
+		&i.Stage,
+		&i.Stream,
+		&i.Message,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createGitDeployment = `-- name: CreateGitDeployment :one
 INSERT INTO deployments (app_id, image_tag, source_type, repository, branch)
 VALUES ($1, $2, 'git', $3, $4)
@@ -216,6 +248,47 @@ func (q *Queries) GetDeploymentByID(ctx context.Context, id pgtype.UUID) (Deploy
 		&i.GithubDeliveryID,
 	)
 	return i, err
+}
+
+const listDeploymentLogs = `-- name: ListDeploymentLogs :many
+SELECT id, deployment_id, stage, stream, message, created_at FROM deployment_logs
+WHERE deployment_id = $1
+  AND id > $2
+ORDER BY id ASC
+LIMIT $3
+`
+
+type ListDeploymentLogsParams struct {
+	DeploymentID pgtype.UUID `json:"deployment_id"`
+	AfterID      int64       `json:"after_id"`
+	Lim          int32       `json:"lim"`
+}
+
+func (q *Queries) ListDeploymentLogs(ctx context.Context, arg ListDeploymentLogsParams) ([]DeploymentLog, error) {
+	rows, err := q.db.Query(ctx, listDeploymentLogs, arg.DeploymentID, arg.AfterID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeploymentLog
+	for rows.Next() {
+		var i DeploymentLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeploymentID,
+			&i.Stage,
+			&i.Stream,
+			&i.Message,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDeployments = `-- name: ListDeployments :many

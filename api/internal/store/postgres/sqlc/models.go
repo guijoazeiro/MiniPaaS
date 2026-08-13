@@ -52,6 +52,15 @@ type Deployment struct {
 	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
 }
 
+type DeploymentLog struct {
+	ID           int64              `json:"id"`
+	DeploymentID pgtype.UUID        `json:"deployment_id"`
+	Stage        string             `json:"stage"`
+	Stream       string             `json:"stream"`
+	Message      string             `json:"message"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type EnvVar struct {
 	ID        pgtype.UUID        `json:"id"`
 	AppID     pgtype.UUID        `json:"app_id"`

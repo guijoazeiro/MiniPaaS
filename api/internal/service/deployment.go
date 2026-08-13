@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +37,10 @@ type EnvDecryptor interface {
 	Decrypted(ctx context.Context, appID uuid.UUID) (map[string]string, error)
 }
 
+type DeploymentLogWriter interface {
+	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
+}
+
 type DeploymentService struct {
 	deps              store.DeploymentStore
 	apps              store.AppStore
@@ -46,16 +52,21 @@ type DeploymentService struct {
 	restartPolicy     string
 	restartMaxRetries int
 	log               *slog.Logger
+	logs              DeploymentLogWriter
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger) *DeploymentService {
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, logs ...DeploymentLogWriter) *DeploymentService {
 	if retention < 1 {
 		retention = 5
+	}
+	var logWriter DeploymentLogWriter
+	if len(logs) > 0 {
+		logWriter = logs[0]
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
-		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log,
+		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter,
 	}
 }
 
@@ -134,10 +145,12 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 
 func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader, dockerfile string) error {
 	start := time.Now()
+	s.event(ctx, dep.ID, "queued", "system", "Deployment iniciado")
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
 	}
+	s.event(ctx, dep.ID, "building", "system", "Construindo imagem Docker")
 
 	var buildLog io.ReadCloser
 	var err error
@@ -149,23 +162,28 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		err = fmt.Errorf("custom Dockerfile builds are unavailable")
 	}
 	if err != nil {
+		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
 	}
-	if _, err := io.Copy(io.Discard, buildLog); err != nil {
+	if err := s.persistBuildOutput(ctx, dep.ID, buildLog); err != nil {
 		_ = buildLog.Close()
+		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
-		return fmt.Errorf("service.RunBuild: drain build log: %w", err)
+		return fmt.Errorf("service.RunBuild: read build log: %w", err)
 	}
 	_ = buildLog.Close()
+	s.event(ctx, dep.ID, "building", "system", "Imagem Docker construída")
 
 	envVars, err := s.env.Decrypted(ctx, app.ID)
 	if err != nil {
+		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
 	}
 
 	if prev, err := s.deps.GetActive(ctx, app.ID); err == nil && prev.ContainerID != "" {
+		s.event(ctx, dep.ID, "cleanup", "system", "Parando container anterior")
 		if err := s.docker.StopContainer(ctx, prev.ContainerID); err != nil {
 			s.log.Warn("stop previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
 		}
@@ -175,6 +193,7 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
 	}
 
+	s.event(ctx, dep.ID, "starting", "system", "Iniciando container")
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image:             dep.ImageTag,
 		Name:              fmt.Sprintf("minipaas-%s", app.Name),
@@ -183,12 +202,15 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		RestartMaxRetries: s.restartMaxRetries,
 	})
 	if err != nil {
+		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: run container: %w", err)
 	}
+	s.event(ctx, dep.ID, "health_check", "system", "Container iniciado; aguardando verificação de saúde")
 
 	durationMs := int(time.Since(start).Milliseconds())
 	if err := s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs); err != nil {
+		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: mark running: %w", err)
 	}
@@ -197,6 +219,7 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 	}
 
 	publicURL, err := s.caddy.UpsertRoute(ctx, app.Name, info.Port)
+	s.event(ctx, dep.ID, "publishing", "system", "Publicando rota da aplicação")
 	if err != nil {
 		s.log.Error("caddy route", "app", app.Name, "err", err)
 	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
@@ -212,7 +235,32 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 	)
 
 	s.pruneImages(ctx, app.ID)
+	s.event(ctx, dep.ID, "cleanup", "system", "Deployment concluído")
 	return nil
+}
+
+func (s *DeploymentService) event(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) {
+	if s.logs == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	if _, err := s.logs.Append(ctx, deploymentID, stage, stream, message); err != nil {
+		s.log.Warn("persist deployment log", "deployment", deploymentID, "stage", stage, "err", err)
+	}
+}
+
+func (s *DeploymentService) persistBuildOutput(ctx context.Context, deploymentID uuid.UUID, rc io.Reader) error {
+	if rc == nil {
+		return nil
+	}
+	scanner := bufio.NewScanner(rc)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			s.event(ctx, deploymentID, "building", "stdout", line)
+		}
+	}
+	return scanner.Err()
 }
 
 func (s *DeploymentService) UpdateGitMetadata(ctx context.Context, depID uuid.UUID, sha, author, message, branch string) error {

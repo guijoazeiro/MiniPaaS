@@ -23,6 +23,10 @@ type DeploymentService interface {
 	Rollback(ctx context.Context, appName string, targetID uuid.UUID, triggeredBy string) (domain.Deployment, error)
 }
 
+type DeploymentLogReader interface {
+	List(ctx context.Context, deploymentID uuid.UUID, afterID int64, limit int) ([]domain.DeploymentLog, error)
+}
+
 func (h *DeploymentHandler) ListAll(c *gin.Context) {
 	page := queryInt(c, "page", 1, 1, 100000)
 	perPage := queryInt(c, "per_page", 50, 1, 200)
@@ -53,10 +57,15 @@ type DeploymentHandler struct {
 	apps          AppLookup
 	log           *slog.Logger
 	maxDeploySize int64
+	logs          DeploymentLogReader
 }
 
-func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger, maxDeploySize int64) *DeploymentHandler {
-	return &DeploymentHandler{svc: svc, apps: apps, log: log, maxDeploySize: maxDeploySize}
+func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger, maxDeploySize int64, logs ...DeploymentLogReader) *DeploymentHandler {
+	var reader DeploymentLogReader
+	if len(logs) > 0 {
+		reader = logs[0]
+	}
+	return &DeploymentHandler{svc: svc, apps: apps, log: log, maxDeploySize: maxDeploySize, logs: reader}
 }
 
 func (h *DeploymentHandler) Create(c *gin.Context) {
@@ -178,4 +187,46 @@ func (h *DeploymentHandler) Get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dep)
+}
+
+func (h *DeploymentHandler) Logs(c *gin.Context) {
+	if h.logs == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "deployment logs unavailable"})
+		return
+	}
+	app, err := h.apps.GetByName(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	depID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
+		return
+	}
+	dep, err := h.svc.Get(c.Request.Context(), depID)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	if dep.AppID != app.ID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+	after := int64(0)
+	if raw := c.Query("after"); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil && parsed >= 0 {
+			after = parsed
+		}
+	}
+	limit := queryInt(c, "limit", 500, 1, 1000)
+	logs, err := h.logs.List(c.Request.Context(), depID, after, limit)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	if logs == nil {
+		logs = []domain.DeploymentLog{}
+	}
+	c.JSON(http.StatusOK, logs)
 }

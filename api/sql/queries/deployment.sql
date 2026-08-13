@@ -80,3 +80,15 @@ WHERE deployments.id IN (
 )
 AND status NOT IN ('running', 'pending', 'building')
 ORDER BY created_at DESC;
+
+-- name: CreateDeploymentLog :one
+INSERT INTO deployment_logs (deployment_id, stage, stream, message)
+VALUES (@deployment_id, @stage, @stream, @message)
+RETURNING *;
+
+-- name: ListDeploymentLogs :many
+SELECT * FROM deployment_logs
+WHERE deployment_id = @deployment_id
+  AND id > @after_id
+ORDER BY id ASC
+LIMIT @lim;

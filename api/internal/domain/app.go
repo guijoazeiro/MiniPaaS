@@ -81,6 +81,15 @@ type DeploymentPage struct {
 	Total   int64                `json:"total"`
 }
 
+type DeploymentLog struct {
+	ID           int64     `json:"id"`
+	DeploymentID uuid.UUID `json:"deployment_id"`
+	Stage        string    `json:"stage"`
+	Stream       string    `json:"stream"`
+	Message      string    `json:"message"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type GitSource struct {
 	AppID                uuid.UUID `json:"app_id"`
 	Repository           string    `json:"repository"`

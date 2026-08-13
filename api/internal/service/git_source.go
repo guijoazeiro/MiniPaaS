@@ -190,13 +190,16 @@ func (s *GitDeploymentService) Run(ctx context.Context, dep domain.Deployment, a
 		branch = source.Branch
 	}
 	cloneCtx, cancel := context.WithTimeout(ctx, s.cloneTimeout)
+	s.deployments.event(ctx, dep.ID, "cloning", "system", fmt.Sprintf("Clonando %s (%s)", source.Repository, branch))
 	snapshot, err := s.preparer.Prepare(cloneCtx, source, branch)
 	cancel()
 	if err != nil {
+		s.deployments.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.deployments.MarkFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunGitBuild: prepare source: %w", err)
 	}
 	defer snapshot.Source.Close()
+	s.deployments.event(ctx, dep.ID, "cloning", "system", fmt.Sprintf("Commit %s preparado", snapshot.CommitSHA))
 	if err := s.deployments.UpdateGitMetadata(ctx, dep.ID, snapshot.CommitSHA, snapshot.CommitAuthor, snapshot.CommitMessage, snapshot.Branch); err != nil {
 		s.deployments.MarkFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunGitBuild: metadata: %w", err)
