@@ -80,7 +80,7 @@ Make releases safe enough for continuously available applications.
 
 If the candidate fails, MiniPaaS keeps the previous deployment serving traffic and records the new deployment as failed.
 
-The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. HTTP health paths, startup grace periods, and resource limits remain follow-up configuration work.
+The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. Optional global runtime caps are now available through `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT`; per-application limits, HTTP health paths, and startup grace periods remain follow-up configuration work.
 
 ### Application configuration
 

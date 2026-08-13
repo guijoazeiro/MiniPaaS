@@ -54,6 +54,7 @@ type DeploymentServiceOptions struct {
 	Logs          DeploymentLogWriter
 	ReadyTimeout  time.Duration
 	CustomDomains CustomDomainRouteSync
+	RuntimeLimits docker.ResourceLimits
 }
 
 type DeploymentService struct {
@@ -70,6 +71,7 @@ type DeploymentService struct {
 	logs              DeploymentLogWriter
 	readyTimeout      time.Duration
 	customDomains     CustomDomainRouteSync
+	runtimeLimits     docker.ResourceLimits
 	executionsMu      sync.Mutex
 	executions        map[uuid.UUID]*deploymentExecution
 	rolloutsMu        sync.Mutex
@@ -87,6 +89,7 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 	var logWriter DeploymentLogWriter
 	readyTimeout := 60 * time.Second
 	var customRoutes CustomDomainRouteSync
+	var runtimeLimits docker.ResourceLimits
 	for _, option := range options {
 		if option.Logs != nil {
 			logWriter = option.Logs
@@ -97,12 +100,15 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		if option.CustomDomains != nil {
 			customRoutes = option.CustomDomains
 		}
+		if option.RuntimeLimits.MemoryBytes > 0 || option.RuntimeLimits.NanoCPUs > 0 || option.RuntimeLimits.PidsLimit > 0 {
+			runtimeLimits = option.RuntimeLimits
+		}
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
 		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter, readyTimeout: readyTimeout,
-		customDomains: customRoutes,
+		customDomains: customRoutes, runtimeLimits: runtimeLimits,
 		executions: make(map[uuid.UUID]*deploymentExecution),
 		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
@@ -329,6 +335,9 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		Env:               envVars,
 		RestartPolicy:     s.restartPolicy,
 		RestartMaxRetries: s.restartMaxRetries,
+		MemoryBytes:       s.runtimeLimits.MemoryBytes,
+		NanoCPUs:          s.runtimeLimits.NanoCPUs,
+		PidsLimit:         s.runtimeLimits.PidsLimit,
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -675,6 +684,9 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 		Env:               envVars,
 		RestartPolicy:     s.restartPolicy,
 		RestartMaxRetries: s.restartMaxRetries,
+		MemoryBytes:       s.runtimeLimits.MemoryBytes,
+		NanoCPUs:          s.runtimeLimits.NanoCPUs,
+		PidsLimit:         s.runtimeLimits.PidsLimit,
 	})
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: run container: %w", err)

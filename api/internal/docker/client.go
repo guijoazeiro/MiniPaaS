@@ -22,6 +22,15 @@ type RunOptions struct {
 	ContainerPort     string
 	RestartPolicy     string
 	RestartMaxRetries int
+	MemoryBytes       int64
+	NanoCPUs          int64
+	PidsLimit         int64
+}
+
+type ResourceLimits struct {
+	MemoryBytes int64
+	NanoCPUs    int64
+	PidsLimit   int64
 }
 
 type ContainerInfo struct {
@@ -95,6 +104,12 @@ func (c *Client) RunContainer(ctx context.Context, opts RunOptions) (ContainerIn
 			natPort: []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: ""}},
 		},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
+	}
+	hostCfg.Resources.Memory = opts.MemoryBytes
+	hostCfg.Resources.NanoCPUs = opts.NanoCPUs
+	if opts.PidsLimit > 0 {
+		pidsLimit := opts.PidsLimit
+		hostCfg.Resources.PidsLimit = &pidsLimit
 	}
 	hostCfg.RestartPolicy.MaximumRetryCount = opts.RestartMaxRetries
 

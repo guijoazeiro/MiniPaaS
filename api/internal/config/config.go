@@ -37,6 +37,12 @@ type Config struct {
 	GitHubAPIURL            string
 	GitHubWebhookSecret     string
 	DashboardOrigin         string
+	RateLimitWindow         time.Duration
+	AuthRateLimit           int
+	WebhookRateLimit        int
+	ContainerMemoryBytes    int64
+	ContainerNanoCPUs       int64
+	ContainerPidsLimit      int64
 	LogLevel                string
 }
 
@@ -104,6 +110,30 @@ func Load() (*Config, error) {
 	if err != nil || gitCloneTimeout <= 0 {
 		return nil, fmt.Errorf("config: GIT_CLONE_TIMEOUT must be a positive duration")
 	}
+	rateLimitWindow, err := time.ParseDuration(env("RATE_LIMIT_WINDOW", "1m"))
+	if err != nil || rateLimitWindow <= 0 {
+		return nil, fmt.Errorf("config: RATE_LIMIT_WINDOW must be a positive duration")
+	}
+	authRateLimit, err := parsePositiveLimit("AUTH_RATE_LIMIT", "10")
+	if err != nil {
+		return nil, err
+	}
+	webhookRateLimit, err := parsePositiveLimit("WEBHOOK_RATE_LIMIT", "120")
+	if err != nil {
+		return nil, err
+	}
+	containerMemoryBytes, err := parseNonNegativeMB("CONTAINER_MEMORY_LIMIT_MB", "0", 1_048_576)
+	if err != nil {
+		return nil, err
+	}
+	containerNanoCPUs, err := parseNonNegativeLimit("CONTAINER_NANO_CPUS", "0", 64_000_000_000)
+	if err != nil {
+		return nil, err
+	}
+	containerPidsLimit, err := parseNonNegativeLimit("CONTAINER_PIDS_LIMIT", "0", 1_000_000)
+	if err != nil {
+		return nil, err
+	}
 	githubAppID, githubAppSlug, githubAppKeyPath, err := githubAppConfig()
 	if err != nil {
 		return nil, err
@@ -135,9 +165,39 @@ func Load() (*Config, error) {
 		GitHubAPIURL:            env("GITHUB_API_URL", "https://api.github.com"),
 		GitHubWebhookSecret:     strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
 		DashboardOrigin:         env("DASHBOARD_ORIGIN", "http://localhost:3000"),
+		RateLimitWindow:         rateLimitWindow,
+		AuthRateLimit:           authRateLimit,
+		WebhookRateLimit:        webhookRateLimit,
+		ContainerMemoryBytes:    containerMemoryBytes,
+		ContainerNanoCPUs:       containerNanoCPUs,
+		ContainerPidsLimit:      containerPidsLimit,
 		LogLevel:                env("LOG_LEVEL", "info"),
 	}, nil
 
+}
+
+func parsePositiveLimit(key, fallback string) (int, error) {
+	value, err := strconv.Atoi(env(key, fallback))
+	if err != nil || value < 1 || value > 1_000_000 {
+		return 0, fmt.Errorf("config: %s must be an integer between 1 and 1000000", key)
+	}
+	return value, nil
+}
+
+func parseNonNegativeLimit(key, fallback string, max int64) (int64, error) {
+	value, err := strconv.ParseInt(env(key, fallback), 10, 64)
+	if err != nil || value < 0 || value > max {
+		return 0, fmt.Errorf("config: %s must be an integer between 0 and %d", key, max)
+	}
+	return value, nil
+}
+
+func parseNonNegativeMB(key, fallback string, maxMB int64) (int64, error) {
+	value, err := parseNonNegativeLimit(key, fallback, maxMB)
+	if err != nil {
+		return 0, err
+	}
+	return value * 1024 * 1024, nil
 }
 
 func githubAppConfig() (int64, string, string, error) {

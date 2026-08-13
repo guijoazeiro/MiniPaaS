@@ -716,7 +716,17 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `RESTART_POLICY` | no | `on-failure` | Docker restart policy for app containers: `no`, `always`, `on-failure`, or `unless-stopped`. |
 | `RESTART_MAX_RETRIES` | no | `3` | Maximum retries used by Docker's `on-failure` restart policy. |
 | `DASHBOARD_ORIGIN` | no | `http://localhost:3000` | Browser origin allowed to authenticate with the API dashboard cookie. |
+| `RATE_LIMIT_WINDOW` | no | `1m` | Fixed window used by the in-memory protection for sensitive endpoints. |
+| `AUTH_RATE_LIMIT` | no | `10` | Maximum login and web-login requests per client address during the rate window. |
+| `WEBHOOK_RATE_LIMIT` | no | `120` | Maximum GitHub webhook requests per client address during the rate window. |
+| `CONTAINER_MEMORY_LIMIT_MB` | no | `0` | Optional memory cap applied to every app container, in MiB. `0` means unlimited. |
+| `CONTAINER_NANO_CPUS` | no | `0` | Optional Docker NanoCPUs cap applied to every app container. `0` means unlimited. |
+| `CONTAINER_PIDS_LIMIT` | no | `0` | Optional maximum number of processes per app container. `0` means unlimited. |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
+
+Authentication (`/auth/login` and `/auth/web-login`) and the GitHub webhook endpoint return `429 Too Many Requests` with `Retry-After` when their fixed-window limit is reached. The limiter is intentionally in memory and per API process; a multi-instance deployment must move this state to a shared store. The key uses the direct peer address and does not trust arbitrary `X-Forwarded-For` headers.
+
+When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited; per-application limits and build-time isolation are still future work.
 
 ## Development
 

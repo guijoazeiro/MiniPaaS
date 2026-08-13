@@ -100,7 +100,12 @@ func main() {
 	appSvc := service.NewAppService(appStore)
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
 	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout, CustomDomains: domainSvc})
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{
+		Logs:          depLogStore,
+		ReadyTimeout:  cfg.DeployReadyTimeout,
+		CustomDomains: domainSvc,
+		RuntimeLimits: docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
+	})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
 	}
@@ -141,6 +146,8 @@ func main() {
 	}
 	r := gin.New()
 	r.Use(gin.Recovery(), requestLogger(log), corsMiddleware(cfg.DashboardOrigin))
+	authRateLimiter := middleware.NewRateLimiter(cfg.AuthRateLimit, cfg.RateLimitWindow)
+	webhookRateLimiter := middleware.NewRateLimiter(cfg.WebhookRateLimit, cfg.RateLimitWindow)
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := pool.Ping(c.Request.Context()); err != nil {
@@ -149,10 +156,10 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.POST("/auth/login", authH.Login)
-	r.POST("/auth/web-login", authH.WebLogin)
+	r.POST("/auth/login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.Login)
+	r.POST("/auth/web-login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.WebLogin)
 	r.POST("/auth/logout", authH.Logout)
-	r.POST("/integrations/github/webhook", githubWebhookH.Handle)
+	r.POST("/integrations/github/webhook", webhookRateLimiter.RateLimit(middleware.RemoteIPKey), githubWebhookH.Handle)
 
 	auth := r.Group("/", middleware.Auth(authSvc))
 
