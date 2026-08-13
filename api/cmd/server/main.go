@@ -72,6 +72,7 @@ func main() {
 	q := sqlc.New(pool)
 	appStore := postgres.NewAppStore(q)
 	depStore := postgres.NewDeploymentStore(q)
+	domainStore := postgres.NewCustomDomainStore(q)
 	depLogStore := postgres.NewDeploymentLogStore(q)
 	userStore := postgres.NewUserStore(q)
 	envStore := postgres.NewEnvStore(q)
@@ -97,7 +98,12 @@ func main() {
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, depLogStore)
+	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
+	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout, CustomDomains: domainSvc})
+	if err := depSvc.RecoverCandidates(ctx); err != nil {
+		log.Warn("recover deployment candidates", "err", err)
+	}
 	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
 	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
 	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)
@@ -120,12 +126,15 @@ func main() {
 
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
+	domainH := handler.NewCustomDomainHandler(domainSvc, log)
+	metricsH := handler.NewMetricsHandler(metricsSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize, depLogStore, gitDepSvc)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
+	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -152,6 +161,11 @@ func main() {
 	auth.GET("/apps/:name", appH.Get)
 	auth.POST("/apps/:name/stop", appH.Stop)
 	auth.DELETE("/apps/:name", appH.Delete)
+	auth.GET("/apps/:name/metrics", metricsH.Get)
+	auth.GET("/apps/:name/domains", domainH.List)
+	auth.POST("/apps/:name/domains", domainH.Create)
+	auth.POST("/apps/:name/domains/:domainID/verify", domainH.Verify)
+	auth.DELETE("/apps/:name/domains/:domainID", domainH.Delete)
 
 	auth.POST("/apps/:name/deployments", depH.Create)
 	auth.GET("/deployments", depH.ListAll)
@@ -179,6 +193,7 @@ func main() {
 	auth.DELETE("/apps/:name/env/:key", envH.Delete)
 
 	auth.GET("/apps/:name/logs", wsH.Serve)
+	auth.GET("/apps/:name/metrics/stream", metricsWS.Serve)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,

@@ -27,11 +27,13 @@ const navItems = [
   { href: "/dashboard/projects", label: "Projetos" },
   { href: "/dashboard/deployments", label: "Deployments" },
   { href: "/dashboard/logs", label: "Logs" },
+  { href: "/dashboard/metrics", label: "Métricas" },
 ];
 
 function pageTitle(pathname: string) {
   if (pathname.startsWith("/dashboard/deployments")) return "Deployments";
   if (pathname.startsWith("/dashboard/logs")) return "Logs";
+  if (pathname.startsWith("/dashboard/metrics")) return "Métricas";
   if (/^\/dashboard\/projects\/.+/.test(pathname)) return "Detalhes do projeto";
   return "Projetos";
 }

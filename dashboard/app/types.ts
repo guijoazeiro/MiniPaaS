@@ -10,6 +10,72 @@ export type App = {
   updated_at: string;
 };
 
+export type CustomDomain = {
+  id: string;
+  app_id: string;
+  hostname: string;
+  status: "pending" | "verified" | "active" | "error";
+  last_error?: string;
+  verified_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AppMetrics = {
+  app_name: string;
+  collected_at: string;
+  runtime?: {
+    container_id?: string;
+    state: string;
+    restart_count: number;
+    uptime_seconds: number;
+    started_at?: string;
+    cpu_percent: number;
+    memory_usage_bytes: number;
+    memory_limit_bytes: number;
+    memory_percent: number;
+    network_rx_bytes: number;
+    network_tx_bytes: number;
+    block_read_bytes: number;
+    block_write_bytes: number;
+    pids: number;
+  };
+  deployments: {
+    total: number;
+    successful: number;
+    failed: number;
+    in_progress: number;
+    success_rate: number;
+    average_duration_ms: number;
+  };
+  health_check_failures: Array<{
+    deployment_id: string;
+    message: string;
+    created_at: string;
+  }>;
+};
+
+export type MetricsPoint = {
+  ts: string;
+  cpu_percent: number;
+  memory_percent: number;
+  memory_usage_bytes: number;
+  network_rx_bytes: number;
+  network_tx_bytes: number;
+  block_read_bytes: number;
+  block_write_bytes: number;
+};
+
+export type LiveMetricsSnapshot = MetricsPoint & {
+  state: string;
+  restart_count: number;
+  uptime_seconds: number;
+  started_at?: string;
+  memory_limit_bytes: number;
+  pids: number;
+  container_id?: string;
+};
+
 export type Deployment = {
   id: string;
   app_id: string;

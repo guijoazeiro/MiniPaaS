@@ -19,6 +19,13 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 8 | Polish, CI, release | ✅ done |
 | 9.1 | Deploy from public GitHub repositories | ✅ done |
 | 9.1.1 | Dashboard navigation and operational UX | 🚧 implemented, awaiting manual validation |
+| 10.1 | Signed GitHub webhooks and auto-deploy | ✅ done |
+| 10.2 | Persistent build logs | ✅ done |
+| 10.3 | Retry and cancellation | ✅ done |
+| 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
+| 12.1 | Custom domains | 🚧 implemented, awaiting DNS/HTTPS validation |
+| 12.2 | Operational metrics | 🚧 implemented, awaiting manual validation |
+| 12.3 | Real-time metrics stream | 🚧 implemented, awaiting manual validation |
 
 ## Stack
 
@@ -33,6 +40,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | Auth | JWT (HS256) + bcrypt | stdlib crypto everywhere, no session storage |
 | Secrets | AES-256-GCM | Authenticated encryption, random nonce per record |
 | Log streaming | gorilla/websocket + docker/stdcopy | Multiplexed stdout/stderr → per-line JSON frames |
+| Metrics streaming | Docker stats + gorilla/websocket | Shared per-container snapshots for live CPU, memory, network, and disk charts |
 | CLI | Go + Cobra | Single-binary target, easy release |
 | Dashboard | Next.js 16 / Vinext (App Router) | Route-based control plane consuming the same API as the CLI |
 
@@ -122,7 +130,23 @@ curl localhost:8080/health
 # {"status":"ok"}
 ```
 
-### 5. Build the CLI
+### 5. Start the dashboard
+
+In another terminal, install the dashboard dependencies and start the local control plane:
+
+```powershell
+cd dashboard
+npm.cmd install
+npm.cmd run dev
+```
+
+Open `http://localhost:3000`. The dashboard uses an HTTP-only cookie created by `POST /auth/web-login`; it does not expose the login token to browser JavaScript. The API must keep `DASHBOARD_ORIGIN=http://localhost:3000` (or the exact origin you use). If the API runs on another address, create `dashboard/.env.local` with:
+
+```env
+NEXT_PUBLIC_MINIPAAS_API_URL=http://localhost:8080
+```
+
+### 6. Build the CLI
 
 New terminal:
 
@@ -131,7 +155,7 @@ cd cli
 go build -o minip.exe .        # Linux/macOS: -o minip
 ```
 
-### 6. Log in
+### 7. Log in
 
 ```powershell
 .\minip.exe login
@@ -144,7 +168,7 @@ Answers when prompted:
 
 Success prints `logged in as admin`. The token is stored in the OS user config directory: `%AppData%\minip\config.json` on Windows and `~/.config/minip/config.json` on Linux/macOS. Subsequent commands read it from there.
 
-### 7. Create an app and set an env var
+### 8. Create an app and set an env var
 
 ```powershell
 .\minip.exe apps create hello
@@ -160,7 +184,7 @@ docker compose exec postgres psql -U postgres -d minipaas -c "SELECT key, encode
 
 Column `value` is always ciphertext — never plaintext.
 
-### 8. Deploy the sample app
+### 9. Deploy the sample app
 
 The repo ships with a minimal Node.js app under `hello-world/` that logs a heartbeat every second (stdout) and an "even beat" every 3 seconds (stderr).
 
@@ -170,7 +194,7 @@ The repo ships with a minimal Node.js app under `hello-world/` that logs a heart
 
 Output ends with something like `running on host port 57123`. That's the host port Docker bound to the container's `:8080`.
 
-### 9. Sanity-check the container
+### 10. Sanity-check the container
 
 ```bash
 curl localhost:<the port from step 8>
@@ -179,7 +203,7 @@ curl localhost:<the port from step 8>
 
 You should also see the request logged to the container's stdout in step 10.
 
-### 10. Stream logs
+### 11. Stream logs
 
 Tail the last 100 lines (then exits normally):
 
@@ -208,7 +232,7 @@ The `GET /foo` line appears live, interleaved with the heartbeat. To show just o
 
 `-f` first prints the selected tail and then keeps streaming while the container produces output. If a container has crashed, `minip logs` still retrieves the saved output from the latest failed deployment for diagnosis.
 
-### 11. Inspect the app
+### 12. Inspect the app
 
 ```powershell
 .\minip.exe apps info hello
@@ -216,12 +240,13 @@ The `GET /foo` line appears live, interleaved with the heartbeat. To show just o
 
 Shows status, live container state (`running`, `exited`, etc.), public URL (`https://hello.<BASE_DOMAIN>` — served by Caddy), and recent deployments (`running`, `superseded`, `failed`, `rolled_back`).
 
-### 12. Test health checks
+### 13. Test health checks
 
 For a faster local check, add these values to `.env` and restart the API:
 
 ```env
 HEALTH_CHECK_INTERVAL=3s
+DEPLOY_READY_TIMEOUT=60s
 RESTART_POLICY=on-failure
 RESTART_MAX_RETRIES=3
 ```
@@ -251,7 +276,7 @@ docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' minip
 
 Expected result: the app and deployment become `failed`, and `container: exited` appears in `apps info`. You can still run `.\minip.exe logs hello` to inspect the crash output.
 
-### 13. Roll back to a previous deployment
+### 14. Roll back to a previous deployment
 
 Make a visible change to `hello-world/server.js` (e.g. change the heartbeat message), redeploy, then roll back:
 
@@ -270,7 +295,7 @@ Non-interactive form:
 
 Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild.
 
-### 14. Clean up
+### 15. Clean up
 
 ```powershell
 .\minip.exe apps list                   # inspect remaining apps
@@ -299,6 +324,11 @@ GET    /apps                          → []App
 GET    /apps/:name                    → App (includes current `container_state` when deployed)
 DELETE /apps/:name                    → 204   (stops container, removes Caddy route, removes row)
 POST   /apps/:name/stop               → 204   (stops runtime and route; preserves app configuration and history)
+GET    /apps/:name/metrics            → AppMetrics snapshot from Docker + deployment history
+GET    /apps/:name/domains             → []CustomDomain
+POST   /apps/:name/domains             { hostname } → CustomDomain (pending DNS verification)
+POST   /apps/:name/domains/:id/verify  → CustomDomain (verified/active after DNS + route validation)
+DELETE /apps/:name/domains/:id         → 204
 
 POST   /apps/:name/deployments        multipart source=<tar> → 202 Deployment (build runs in background)
 POST   /apps/:name/deployments/git    { branch? } → 202 Deployment (clones the connected public repository)
@@ -321,6 +351,8 @@ POST   /apps/:name/deployments/:id/cancel → Deployment (pending/building only)
 
 WS     /apps/:name/logs?follow=true&tail=100     (active deployment, or latest failed deployment with logs)
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
+WS     /apps/:name/metrics/stream                (active container; authenticated)
+       frames: { "type": "metrics", "ts": "...", "runtime": { ... } }
 GET    /apps/:name/deployments/:id/logs?after=0&limit=500 (persisted build events)
 ```
 
@@ -349,6 +381,8 @@ After login, the dashboard opens the project directory instead of selecting the 
 - `/dashboard/projects/:name` contains overview, deployment history, logs, and configuration tabs.
 - `/dashboard/deployments` lists deployments from every project with project/status filters and pagination.
 - `/dashboard/logs` provides a dedicated live console with a project selector. Scrolling up pauses automatic following; **Ir para o final** resumes it.
+- `/dashboard/metrics` provides a project selector and live Docker-style charts for CPU, memory, network, and disk. The page keeps the latest 120 samples in browser memory and reconnects automatically when the WebSocket is interrupted.
+- The project **Configurações** tab manages custom domains and encrypted environment variables.
 
 Theme and logout controls live in the top navigation. The dark theme uses a near-black base and translucent blur across navigation and operational surfaces. Very low-opacity, solid ambient forms are restricted to the page background so the glass remains perceptible; buttons, text, cards, and controls do not use decorative gradients.
 
@@ -507,6 +541,113 @@ cd api
 go run ./cmd/migrate up
 ```
 
+### Zero-downtime deployments (Phase 11)
+
+Deployments now use a candidate rollout when Docker and the persistent deployment store support the Phase 11 capabilities:
+
+1. Build the new image while the current container keeps serving traffic.
+2. Start the new container with a unique candidate name and port.
+3. Wait up to `DEPLOY_READY_TIMEOUT` for the candidate to be running and accepting TCP connections.
+4. Replace the Caddy route atomically, then promote the candidate in PostgreSQL.
+5. Stop and remove the previous container only after the route and deployment record point to the candidate.
+
+If the candidate exits, fails readiness, the route cannot be switched, or the promotion is interrupted, the candidate is removed and the previous release remains active. Deployments are serialized per application during the rollout portion so concurrent builds cannot orphan an already-promoted container.
+
+Candidate container and port metadata is persisted by migration 012. On API startup, any candidate left by an interrupted process is removed and the route is restored to the last committed running deployment.
+
+Apply the migration before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
+Readiness currently checks the published TCP port, so the application must bind its configured internal port (8080 by default) and listen on all interfaces inside the container. HTTP path checks and per-application startup policies remain future configuration work.
+
+### Custom domains (Phase 12.1)
+
+Applications can have one or more custom hostnames in addition to the default `<app>.<BASE_DOMAIN>` URL. The dashboard exposes this under **Configurações → Domínios customizados** and the API provides:
+
+```text
+GET    /apps/:name/domains
+POST   /apps/:name/domains                 { "hostname": "api.example.com" }
+POST   /apps/:name/domains/:id/verify
+DELETE /apps/:name/domains/:id
+```
+
+Create the DNS record before verifying the domain. Records start as `pending`; after DNS resolution and route activation they become `verified` or `active`, and a failed check is recorded as `error`. MiniPaaS resolves the hostname, optionally compares the result with `PUBLIC_IP`, and then creates the Caddy route. Caddy handles HTTPS automatically when the hostname points to the server and ports 80/443 are reachable. Set `PUBLIC_IP` in production for strict ownership validation; when it is empty, local development accepts any hostname that resolves.
+
+For a local-only test, `nip.io` maps a hostname to an IP encoded in the name. With the API and Caddy running on the same machine, add `api.127.0.0.1.nip.io` in **Configurações → Domínios customizados**, verify it, and test the route:
+
+```powershell
+Resolve-DnsName api.127.0.0.1.nip.io
+curl.exe -i -H "Host: api.127.0.0.1.nip.io" http://localhost/
+```
+
+The application must be listening on the internal port expected by its Dockerfile/runtime (`8080` by default). For example, a `PORT=9000` environment variable makes the container listen on a different port and results in a Caddy `502 Bad Gateway` until the application is changed back to `PORT=8080` or the runtime port contract is updated.
+
+Apply migration 013 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
+### Operational metrics (Phase 12.2)
+
+Project details expose a lightweight, on-demand metrics snapshot at:
+
+```text
+GET /apps/:name/metrics
+```
+
+The response includes current container CPU and memory usage, uptime, restart count, deployment success/failure summary, average deployment duration, and recent health-check failures. The dashboard renders these values under **Visão geral → Métricas operacionais**. The overview requests a fresh snapshot during its normal project refresh (currently every five seconds); it is not a historical time-series. Metrics are collected directly from Docker when requested; no Prometheus service or additional database migration is required.
+
+### Real-time metrics (Phase 12.3)
+
+The dedicated **Métricas** page opens an authenticated WebSocket stream for the selected application:
+
+```text
+GET /apps/:name/metrics/stream
+```
+
+The backend shares one Docker stats stream per active container between connected viewers. A stream starts when the first viewer subscribes and is cancelled when the last viewer leaves, so opening the same metrics page in multiple tabs does not create one Docker stats stream per tab. Docker emits samples at roughly one-second intervals; the exact cadence is controlled by the Docker Engine.
+
+The dashboard keeps a rolling window of the latest 120 samples for CPU, memory, network, and disk charts, reconnects automatically, and loads `GET /apps/:name/metrics` first as the initial snapshot/fallback. No time-series samples are persisted in PostgreSQL in this phase.
+
+The WebSocket frame has this shape:
+
+```json
+{
+  "type": "metrics",
+  "ts": "2026-08-13T20:00:00Z",
+  "runtime": {
+    "container_id": "a1b2c3d4e5f6",
+    "state": "running",
+    "restart_count": 0,
+    "uptime_seconds": 600,
+    "cpu_percent": 0.12,
+    "memory_usage_bytes": 12400000,
+    "memory_limit_bytes": 4026531840,
+    "memory_percent": 0.31,
+    "network_rx_bytes": 1070,
+    "network_tx_bytes": 264,
+    "block_read_bytes": 5720000,
+    "block_write_bytes": 0,
+    "pids": 2
+  }
+}
+```
+
+To validate the live stream locally, keep the API and dashboard running, open **Métricas**, select an application with a running container, and generate temporary CPU load in another PowerShell terminal:
+
+```powershell
+docker ps --filter "name=minipaas-nodetest" --format "{{.Names}}"
+docker exec <container-name> node -e "const end=Date.now()+30000; while(Date.now()<end){}"
+```
+
+Replace `<container-name>` with the value returned by the first command. The CPU card and chart should change during the 30-second workload. The dashboard updates from the WebSocket stream, while the project overview continues to use the snapshot endpoint.
+
 ## Project layout
 
 ```
@@ -524,7 +665,7 @@ minipaas/
 │   │   ├── caddy/                     # Caddy Admin API wrapper (route upsert/remove)
 │   │   ├── crypto/                    # AES-256-GCM cipher
 │   │   ├── health/                    # periodic Docker inspection + failure detection
-│   │   ├── ws/                        # WebSocket log streaming + Docker log demux
+│   │   ├── ws/                        # WebSocket logs + shared metrics streams
 │   │   ├── service/                   # business logic (app, deployment, auth, env)
 │   │   └── handler/                   # Gin handlers + JWT middleware
 │   ├── sql/
@@ -553,6 +694,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | Postgres DSN |
 | `BASE_DOMAIN` | yes | — | e.g. `minipaas.yourdomain.com` — apps become `<name>.<BASE_DOMAIN>` |
+| `PUBLIC_IP` | no | — | Public IPv4/IPv6 used to validate custom-domain DNS. Leave empty only for local development. |
 | `ENCRYPTION_KEY` | yes | — | 32-byte hex (64 chars). Generate with `openssl rand -hex 32` |
 | `JWT_SECRET` | yes | — | Signing secret for auth tokens |
 | `PORT` | no | `:8080` | HTTP listen address |
@@ -563,6 +705,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `ADMIN_PASSWORD` | no | — | First-run admin seed. Ignored once a user exists |
 | `IMAGE_RETENTION` | no | `5` | How many recent deployment images to keep per app. Older ones are pruned (best-effort) after each successful deploy — Docker refuses to delete in-use images, so the active one is always safe. |
 | `HEALTH_CHECK_INTERVAL` | no | `30s` | How often running containers are inspected; `exited`, `dead`, and missing containers are marked failed. |
+| `DEPLOY_READY_TIMEOUT` | no | `60s` | Maximum time a new candidate container may take to accept TCP connections before the rollout is failed and the current release remains active. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
 | `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
 | `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. The Docker build keeps its existing lifecycle. |
@@ -610,6 +753,10 @@ go test ./...
 # CLI module (separate go.mod)
 cd cli && go test ./...
 
+# Dashboard (from dashboard/)
+npm test
+npm run lint
+
 # Both
 go test ./... && (cd cli && go test ./...)
 
@@ -623,6 +770,7 @@ Coverage today:
 - `service/env` — encrypt/decrypt roundtrip, **at-rest plaintext check**, key validation, app isolation
 - `caddy` — bootstrap probe + upsert JSON contract + tolerant delete
 - `ws` — line splitter + end-to-end WS handler with a fake Docker stream (via `stdcopy.NewStdWriter`) proving demux, ordering, and frame format
+- `docker` / `ws` — CPU calculation, network/disk aggregation, and shared metrics-stream subscription coverage
 - `health` — exited/missing containers transition their deployment and app to `failed`; current container state lookup
 - `cli/tarball` — kept/skipped paths, slash-normalized entries
 - `store/postgres` (integration tag) — app persistence, uniqueness constraints, status and public URL updates against a real PostgreSQL instance

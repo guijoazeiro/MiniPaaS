@@ -29,6 +29,14 @@ type DockerfileBuilder interface {
 	BuildImageWithDockerfile(ctx context.Context, tar io.Reader, tag, dockerfile string) (io.ReadCloser, error)
 }
 
+type ContainerReadiness interface {
+	WaitContainerReady(ctx context.Context, id string, port int, opts docker.ReadinessOptions) error
+}
+
+type AtomicCaddyRouter interface {
+	SwitchRoute(ctx context.Context, appName string, port int) (publicURL string, err error)
+}
+
 type CaddyRouter interface {
 	UpsertRoute(ctx context.Context, appName string, port int) (publicURL string, err error)
 	RemoveRoute(ctx context.Context, appName string) error
@@ -40,6 +48,12 @@ type EnvDecryptor interface {
 
 type DeploymentLogWriter interface {
 	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
+}
+
+type DeploymentServiceOptions struct {
+	Logs          DeploymentLogWriter
+	ReadyTimeout  time.Duration
+	CustomDomains CustomDomainRouteSync
 }
 
 type DeploymentService struct {
@@ -54,27 +68,43 @@ type DeploymentService struct {
 	restartMaxRetries int
 	log               *slog.Logger
 	logs              DeploymentLogWriter
+	readyTimeout      time.Duration
+	customDomains     CustomDomainRouteSync
 	executionsMu      sync.Mutex
 	executions        map[uuid.UUID]*deploymentExecution
+	rolloutsMu        sync.Mutex
+	rollouts          map[uuid.UUID]chan struct{}
 }
 
 type deploymentExecution struct {
 	cancel context.CancelFunc
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, logs ...DeploymentLogWriter) *DeploymentService {
+func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, options ...DeploymentServiceOptions) *DeploymentService {
 	if retention < 1 {
 		retention = 5
 	}
 	var logWriter DeploymentLogWriter
-	if len(logs) > 0 {
-		logWriter = logs[0]
+	readyTimeout := 60 * time.Second
+	var customRoutes CustomDomainRouteSync
+	for _, option := range options {
+		if option.Logs != nil {
+			logWriter = option.Logs
+		}
+		if option.ReadyTimeout > 0 {
+			readyTimeout = option.ReadyTimeout
+		}
+		if option.CustomDomains != nil {
+			customRoutes = option.CustomDomains
+		}
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
-		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter,
+		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter, readyTimeout: readyTimeout,
+		customDomains: customRoutes,
 		executions: make(map[uuid.UUID]*deploymentExecution),
+		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
 }
 
@@ -274,24 +304,28 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return err
 	}
 
-	if prev, err := s.deps.GetActive(ctx, app.ID); err == nil && prev.ContainerID != "" {
-		s.event(ctx, dep.ID, "cleanup", "system", "Parando container anterior")
-		if err := s.docker.StopContainer(ctx, prev.ContainerID); err != nil {
-			s.log.Warn("stop previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
-		}
-		if err := s.docker.RemoveContainer(ctx, prev.ContainerID); err != nil {
-			s.log.Warn("remove previous container", "app", app.Name, "container", prev.ContainerID, "err", err)
-		}
-		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
+	releaseRollout, err := s.acquireRollout(ctx, app.ID)
+	if err != nil {
+		return s.finishCancelled(ctx, dep, app.ID, "aguardando outro rollout")
+	}
+	defer releaseRollout()
+
+	var previous domain.Deployment
+	if active, activeErr := s.deps.GetActive(ctx, app.ID); activeErr == nil {
+		previous = active
+	} else if !errors.Is(activeErr, domain.ErrDeploymentNotFound) {
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: get active deployment: %w", activeErr)
 	}
 	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
 		return err
 	}
 
-	s.event(ctx, dep.ID, "starting", "system", "Iniciando container")
+	candidateName := fmt.Sprintf("minipaas-%s-%s", app.Name, dep.ID.String()[:8])
+	s.event(ctx, dep.ID, "starting", "system", "Iniciando container candidato")
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image:             dep.ImageTag,
-		Name:              fmt.Sprintf("minipaas-%s", app.Name),
+		Name:              candidateName,
 		Env:               envVars,
 		RestartPolicy:     s.restartPolicy,
 		RestartMaxRetries: s.restartMaxRetries,
@@ -304,18 +338,110 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: run container: %w", err)
 	}
+	candidateStore, hasCandidateStore := s.deps.(store.DeploymentCandidateStore)
+	if hasCandidateStore {
+		if err := candidateStore.UpdateCandidate(ctx, dep.ID, info.ID, info.Port); err != nil {
+			_ = s.cleanupCandidate(context.WithoutCancel(ctx), info.ID)
+			s.markFailed(ctx, dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: persist candidate: %w", err)
+		}
+	}
+	cleanupCandidate := func(cleanupCtx context.Context) {
+		if err := s.cleanupCandidate(cleanupCtx, info.ID); err != nil {
+			s.log.Warn("cleanup candidate", "app", app.Name, "deployment", dep.ID, "container", info.ID, "err", err)
+		}
+		if hasCandidateStore {
+			if err := candidateStore.ClearCandidate(context.WithoutCancel(cleanupCtx), dep.ID); err != nil {
+				s.log.Warn("clear candidate metadata", "deployment", dep.ID, "err", err)
+			}
+		}
+	}
+	if readiness, ok := s.docker.(ContainerReadiness); ok {
+		s.event(ctx, dep.ID, "health_check", "system", "Aguardando o container candidato ficar pronto")
+		if err := readiness.WaitContainerReady(ctx, info.ID, info.Port, docker.ReadinessOptions{Timeout: s.readyTimeout}); err != nil {
+			if ctx.Err() != nil {
+				cleanupCandidate(context.WithoutCancel(ctx))
+				return s.finishCancelled(ctx, dep, app.ID, "readiness interrompida")
+			}
+			cleanupCandidate(context.WithoutCancel(ctx))
+			s.event(ctx, dep.ID, "error", "stderr", "container candidato não ficou pronto: "+err.Error())
+			s.markFailed(ctx, dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: candidate readiness: %w", err)
+		}
+	} else {
+		s.event(ctx, dep.ID, "health_check", "system", "Container candidato iniciado; readiness não configurada")
+	}
 	if ctx.Err() != nil {
-		_ = s.docker.StopContainer(context.WithoutCancel(ctx), info.ID)
-		_ = s.docker.RemoveContainer(context.WithoutCancel(ctx), info.ID)
+		cleanupCandidate(context.WithoutCancel(ctx))
 		return s.finishCancelled(ctx, dep, app.ID, "inicialização interrompida")
 	}
-	s.event(ctx, dep.ID, "health_check", "system", "Container iniciado; aguardando verificação de saúde")
 
 	durationMs := int(time.Since(start).Milliseconds())
-	if err := s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs); err != nil {
+	s.event(ctx, dep.ID, "publishing", "system", "Trocando a rota para o container candidato")
+	publicURL, err := s.switchRoute(ctx, app.Name, info.Port)
+	if err != nil {
 		if ctx.Err() != nil {
+			cleanupCandidate(context.WithoutCancel(ctx))
+			return s.finishCancelled(ctx, dep, app.ID, "troca de rota interrompida")
+		}
+		cleanupCandidate(context.WithoutCancel(ctx))
+		s.event(ctx, dep.ID, "error", "stderr", "troca de rota falhou: "+err.Error())
+		s.markFailed(ctx, dep.ID, app.ID)
+		return fmt.Errorf("service.RunBuild: switch route: %w", err)
+	}
+	if s.customDomains != nil {
+		if err := s.customDomains.SyncRoutes(ctx, app.ID, info.Port); err != nil {
+			if previous.ContainerID != "" {
+				_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			} else {
+				_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
+			}
+			cleanupCandidate(context.WithoutCancel(ctx))
+			s.event(ctx, dep.ID, "error", "stderr", "rotas de domínios customizados falharam: "+err.Error())
+			s.markFailed(ctx, dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: sync custom domains: %w", err)
+		}
+	}
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		if previous.ContainerID != "" {
+			_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+			if s.customDomains != nil {
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			}
+		} else {
+			_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
+		}
+		cleanupCandidate(context.WithoutCancel(ctx))
+		return err
+	}
+	if hasCandidateStore {
+		err = candidateStore.PromoteCandidate(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs)
+	} else {
+		err = s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs)
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			if previous.ContainerID != "" {
+				_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+				if s.customDomains != nil {
+					_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+				}
+			} else {
+				_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
+			}
+			cleanupCandidate(context.WithoutCancel(ctx))
 			return s.finishCancelled(ctx, dep, app.ID, "atualização interrompida")
 		}
+		if previous.ContainerID != "" {
+			_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+			if s.customDomains != nil {
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			}
+		} else {
+			_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
+		}
+		cleanupCandidate(context.WithoutCancel(ctx))
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: mark running: %w", err)
@@ -324,12 +450,18 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		s.log.Warn("update app status", "app", app.Name, "err", err)
 	}
 
-	publicURL, err := s.caddy.UpsertRoute(ctx, app.Name, info.Port)
-	s.event(ctx, dep.ID, "publishing", "system", "Publicando rota da aplicação")
-	if err != nil {
-		s.log.Error("caddy route", "app", app.Name, "err", err)
-	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
+	if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
 		s.log.Warn("update public url", "app", app.Name, "err", err)
+	}
+	if previous.ContainerID != "" && previous.ID != dep.ID {
+		s.event(ctx, dep.ID, "cleanup", "system", "Parando o container anterior após a troca")
+		if err := s.docker.StopContainer(ctx, previous.ContainerID); err != nil {
+			s.log.Warn("stop previous container", "app", app.Name, "container", previous.ContainerID, "err", err)
+		}
+		if err := s.docker.RemoveContainer(ctx, previous.ContainerID); err != nil {
+			s.log.Warn("remove previous container", "app", app.Name, "container", previous.ContainerID, "err", err)
+		}
+		_ = s.deps.UpdateStatus(ctx, previous.ID, domain.DeploymentStatusSuperseded)
 	}
 
 	s.log.Info("deploy ok",
@@ -342,6 +474,82 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 
 	s.pruneImages(ctx, app.ID)
 	s.event(ctx, dep.ID, "cleanup", "system", "Deployment concluído")
+	return nil
+}
+
+func (s *DeploymentService) switchRoute(ctx context.Context, appName string, port int) (string, error) {
+	if atomic, ok := s.caddy.(AtomicCaddyRouter); ok {
+		return atomic.SwitchRoute(ctx, appName, port)
+	}
+	return s.caddy.UpsertRoute(ctx, appName, port)
+}
+
+func (s *DeploymentService) cleanupCandidate(ctx context.Context, containerID string) error {
+	if containerID == "" {
+		return nil
+	}
+	stopErr := s.docker.StopContainer(ctx, containerID)
+	removeErr := s.docker.RemoveContainer(ctx, containerID)
+	return errors.Join(stopErr, removeErr)
+}
+
+// acquireRollout serializes the route transition for each application. Image
+// builds may run concurrently, but only one candidate can be promoted at a
+// time; otherwise two deployments could both observe the same active release
+// and leave an already-promoted container orphaned.
+func (s *DeploymentService) acquireRollout(ctx context.Context, appID uuid.UUID) (func(), error) {
+	s.rolloutsMu.Lock()
+	lock := s.rollouts[appID]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		s.rollouts[appID] = lock
+	}
+	s.rolloutsMu.Unlock()
+
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// RecoverCandidates cleans candidates left behind by an API restart. The last
+// committed running deployment remains the source of truth, so its route is
+// restored before the orphan candidate is removed.
+func (s *DeploymentService) RecoverCandidates(ctx context.Context) error {
+	candidates, ok := s.deps.(store.DeploymentCandidateStore)
+	if !ok {
+		return nil
+	}
+	items, err := candidates.ListCandidates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range items {
+		previous, previousErr := s.deps.GetActive(ctx, candidate.AppID)
+		app, appErr := s.apps.GetByID(ctx, candidate.AppID)
+		if previousErr == nil && appErr == nil && previous.ContainerID != "" {
+			if _, routeErr := s.switchRoute(ctx, app.Name, previous.Port); routeErr != nil {
+				s.log.Warn("restore route for orphan candidate", "app", app.Name, "deployment", candidate.ID, "err", routeErr)
+			}
+			if s.customDomains != nil {
+				if syncErr := s.customDomains.SyncRoutes(ctx, candidate.AppID, previous.Port); syncErr != nil {
+					s.log.Warn("restore custom routes for orphan candidate", "app", app.Name, "deployment", candidate.ID, "err", syncErr)
+				}
+			}
+		} else if appErr == nil {
+			if routeErr := s.caddy.RemoveRoute(ctx, app.Name); routeErr != nil {
+				s.log.Warn("remove route for orphan candidate", "app", app.Name, "deployment", candidate.ID, "err", routeErr)
+			}
+		}
+		if cleanupErr := s.cleanupCandidate(ctx, candidate.CandidateContainerID); cleanupErr != nil {
+			s.log.Warn("cleanup orphan candidate", "deployment", candidate.ID, "container", candidate.CandidateContainerID, "err", cleanupErr)
+		}
+		_ = candidates.ClearCandidate(ctx, candidate.ID)
+		_ = s.deps.UpdateStatus(ctx, candidate.ID, domain.DeploymentStatusFailed)
+		s.event(ctx, candidate.ID, "cleanup", "system", "Candidato órfão removido após reinício da API")
+	}
 	return nil
 }
 
@@ -434,6 +642,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: decrypt env: %w", err)
 	}
+	releaseRollout, err := s.acquireRollout(ctx, app.ID)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: wait for rollout: %w", err)
+	}
+	defer releaseRollout()
 
 	var fromID uuid.UUID
 	current, err := s.deps.GetActive(ctx, app.ID)
@@ -481,6 +694,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
 		s.log.Warn("rollback: update public url", "err", err)
 	}
+	if s.customDomains != nil {
+		if err := s.customDomains.SyncRoutes(ctx, app.ID, info.Port); err != nil {
+			s.log.Warn("rollback: custom domain routes", "err", err)
+		}
+	}
 
 	if err := s.rollbacks.Record(ctx, app.ID, fromID, target.ID, triggeredBy); err != nil {
 		s.log.Warn("rollback: history", "err", err)
@@ -517,8 +735,19 @@ func (s *DeploymentService) pruneImages(ctx context.Context, appID uuid.UUID) {
 }
 
 func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
+	releaseRollout, err := s.acquireRollout(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("service.StopApp: wait for rollout: %w", err)
+	}
+	defer releaseRollout()
+
 	if err := s.caddy.RemoveRoute(ctx, app.Name); err != nil {
 		s.log.Warn("caddy remove route", "app", app.Name, "err", err)
+	}
+	if s.customDomains != nil {
+		if err := s.customDomains.RemoveRoutes(ctx, app.ID); err != nil {
+			s.log.Warn("remove custom domain routes", "app", app.Name, "err", err)
+		}
 	}
 	dep, err := s.deps.GetActive(ctx, app.ID)
 	if err != nil {

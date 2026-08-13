@@ -5,13 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError, formatTime, request, stateLabel } from "../lib/api";
 import { useLogStream } from "../hooks/useLogStream";
-import type { App, Deployment, EnvKey, GitHubInstallation, GitHubRepository, GitSource } from "../types";
+import type { App, AppMetrics, CustomDomain, Deployment, EnvKey, GitHubInstallation, GitHubRepository, GitSource } from "../types";
 import { DeployPanel } from "./DeployPanel";
 import { DeploymentList } from "./DeploymentList";
 import { DeploymentLogsPanel } from "./DeploymentLogsPanel";
 import { EnvPanel } from "./EnvPanel";
 import { GitDeployPanel } from "./GitDeployPanel";
 import { LogViewer } from "./LogViewer";
+import { MetricsPanel } from "./MetricsPanel";
+import { CustomDomainPanel } from "./CustomDomainPanel";
 import { useDashboard } from "./DashboardShell";
 
 type Tab = "overview" | "deployments" | "logs" | "settings";
@@ -31,6 +33,8 @@ export function ProjectDetails({ name }: { name: string }) {
   const [app, setApp] = useState<App | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [envKeys, setEnvKeys] = useState<EnvKey[]>([]);
+  const [customDomains, setCustomDomains] = useState<CustomDomain[]>([]);
+  const [metrics, setMetrics] = useState<AppMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [deployFile, setDeployFile] = useState<File | null>(null);
   const [deploying, setDeploying] = useState(false);
@@ -43,6 +47,10 @@ export function ProjectDetails({ name }: { name: string }) {
   const [envValue, setEnvValue] = useState("");
   const [savingEnv, setSavingEnv] = useState(false);
   const [deletingEnvKey, setDeletingEnvKey] = useState("");
+  const [customHostname, setCustomHostname] = useState("");
+  const [savingCustomDomain, setSavingCustomDomain] = useState(false);
+  const [verifyingCustomDomain, setVerifyingCustomDomain] = useState("");
+  const [deletingCustomDomain, setDeletingCustomDomain] = useState("");
   const [gitSource, setGitSource] = useState<GitSource | null>(null);
   const [gitMode, setGitMode] = useState<"public" | "github_app">("public");
   const [gitRepository, setGitRepository] = useState("");
@@ -64,14 +72,18 @@ export function ProjectDetails({ name }: { name: string }) {
 
   const refreshProject = useCallback(async () => {
     const encodedName = encodeURIComponent(name);
-    const [nextApp, nextDeployments, nextEnv] = await Promise.all([
+    const [nextApp, nextDeployments, nextEnv, nextDomains, nextMetrics] = await Promise.all([
       request<App>(`/apps/${encodedName}`),
       request<Deployment[]>(`/apps/${encodedName}/deployments`),
       request<EnvKey[]>(`/apps/${encodedName}/env`),
+      request<CustomDomain[]>(`/apps/${encodedName}/domains`),
+      request<AppMetrics>(`/apps/${encodedName}/metrics`),
     ]);
     setApp(nextApp);
     setDeployments(nextDeployments);
     setEnvKeys(nextEnv);
+    setCustomDomains(nextDomains);
+    setMetrics(nextMetrics);
     return nextApp;
   }, [name]);
 
@@ -364,21 +376,63 @@ export function ProjectDetails({ name }: { name: string }) {
     }
   }
 
+  async function addCustomDomain(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!customHostname.trim()) return;
+    setSavingCustomDomain(true);
+    try {
+      await request<CustomDomain>(`/apps/${encodeURIComponent(name)}/domains`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hostname: customHostname.trim() }) });
+      setCustomHostname("");
+      setFeedback("Domínio adicionado. Configure o DNS e verifique-o para ativar.");
+      await refreshProject();
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível adicionar o domínio.", "error");
+    } finally {
+      setSavingCustomDomain(false);
+    }
+  }
+
+  async function verifyCustomDomain(id: string) {
+    setVerifyingCustomDomain(id);
+    try {
+      await request<CustomDomain>(`/apps/${encodeURIComponent(name)}/domains/${encodeURIComponent(id)}/verify`, { method: "POST" });
+      setFeedback("Domínio verificado e rota atualizada.");
+      await refreshProject();
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível verificar o domínio.", "error");
+    } finally {
+      setVerifyingCustomDomain("");
+    }
+  }
+
+  async function deleteCustomDomain(id: string) {
+    setDeletingCustomDomain(id);
+    try {
+      await request(`/apps/${encodeURIComponent(name)}/domains/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setFeedback("Domínio removido.");
+      await refreshProject();
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível remover o domínio.", "error");
+    } finally {
+      setDeletingCustomDomain("");
+    }
+  }
+
   if (loading || !app) return <div className="list-placeholder">Carregando projeto…</div>;
 
   return (
     <>
       <header className="project-heading">
         <div><Link className="back-link" href="/dashboard/projects">Voltar para projetos</Link><div className="project-title-line"><h1>{app.name}</h1><span className={`status-pill ${app.status}`}><i />{stateLabel(app.status)}</span></div><p className="page-description">Atualizado em {formatTime(app.updated_at)}</p></div>
-        <div className="project-heading-actions">{app.public_url && <a className="button secondary button-link" href={app.public_url} target="_blank" rel="noreferrer">Abrir aplicação</a>}<Link className="button secondary button-link" href={`/dashboard/logs?app=${encodeURIComponent(name)}`}>Logs em tela cheia</Link></div>
+        <div className="project-heading-actions">{app.public_url && <a className="button secondary button-link" href={app.public_url} target="_blank" rel="noreferrer">Abrir aplicação</a>}<Link className="button secondary button-link" href={`/dashboard/metrics?app=${encodeURIComponent(name)}`}>Ver métricas</Link><Link className="button secondary button-link" href={`/dashboard/logs?app=${encodeURIComponent(name)}`}>Logs em tela cheia</Link></div>
       </header>
 
       <nav className="project-tabs" aria-label="Seções do projeto">{tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => changeTab(item.id)}>{item.label}</button>)}</nav>
 
-      {tab === "overview" && <div className="project-section-stack"><DeployPanel app={app} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={confirmingStop} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => undefined} onRequestStop={stopApp} onCancelStop={() => setConfirmingStop(false)} /><section className="panel project-summary"><div className="section-heading"><div><p className="eyebrow">ÚLTIMA ATIVIDADE</p><h2>Resumo operacional</h2></div></div><div className="summary-grid"><div><span>Origem</span><strong>{gitSource ? "GitHub" : "Upload manual"}</strong><small>{gitSource?.repository || "Nenhum repositório conectado"}</small></div><div><span>Deployments</span><strong>{deployments.length}</strong><small>{deployments[0] ? `Último: ${stateLabel(deployments[0].status)}` : "Nenhum release"}</small></div><div><span>Variáveis</span><strong>{envKeys.length}</strong><small>nomes configurados</small></div></div></section></div>}
+      {tab === "overview" && <div className="project-section-stack"><DeployPanel app={app} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={confirmingStop} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => undefined} onRequestStop={stopApp} onCancelStop={() => setConfirmingStop(false)} /><MetricsPanel metrics={metrics} /><section className="panel project-summary"><div className="section-heading"><div><p className="eyebrow">ÚLTIMA ATIVIDADE</p><h2>Resumo operacional</h2></div></div><div className="summary-grid"><div><span>Origem</span><strong>{gitSource ? "GitHub" : "Upload manual"}</strong><small>{gitSource?.repository || "Nenhum repositório conectado"}</small></div><div><span>Deployments</span><strong>{deployments.length}</strong><small>{deployments[0] ? `Último: ${stateLabel(deployments[0].status)}` : "Nenhum release"}</small></div><div><span>Variáveis</span><strong>{envKeys.length}</strong><small>nomes configurados</small></div></div></section></div>}
       {tab === "deployments" && <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} onViewLogs={viewDeploymentLogs} retryingID={retryingID} cancellingID={cancellingID} onRetry={retryDeployment} onCancel={cancelDeployment} />}
       {tab === "logs" && <div className="project-section-stack">{searchParams.get("deployment") && <DeploymentLogsPanel appName={name} deploymentID={searchParams.get("deployment")!} />}<LogViewer logs={logStream.logs} outputRef={logStream.outputRef} following={logStream.following} connection={logStream.connection} dedicated onScroll={logStream.handleScroll} onResume={logStream.resumeFollowing} onClear={logStream.clearLogs} /></div>}
-      {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} webhooksEnabled={githubWebhooksEnabled} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} togglingAutoDeploy={togglingAutoDeploy} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onToggleAutoDeploy={toggleAutoDeploy} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
+      {tab === "settings" && <div className="project-section-stack"><CustomDomainPanel domains={customDomains} hostname={customHostname} saving={savingCustomDomain} verifyingID={verifyingCustomDomain} deletingID={deletingCustomDomain} onHostnameChange={setCustomHostname} onAdd={addCustomDomain} onVerify={verifyCustomDomain} onDelete={deleteCustomDomain} /><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} webhooksEnabled={githubWebhooksEnabled} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} togglingAutoDeploy={togglingAutoDeploy} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onToggleAutoDeploy={toggleAutoDeploy} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
     </>
   );
 }

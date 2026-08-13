@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"time"
 
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
@@ -30,6 +32,11 @@ type ContainerInfo struct {
 type ContainerState struct {
 	Status  string
 	Running bool
+}
+
+type ReadinessOptions struct {
+	Timeout  time.Duration
+	Interval time.Duration
 }
 
 type Client struct {
@@ -103,11 +110,13 @@ func (c *Client) RunContainer(ctx context.Context, opts RunOptions) (ContainerIn
 
 	inspect, err := c.cli.ContainerInspect(ctx, created.ID)
 	if err != nil {
+		_ = c.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
 		return ContainerInfo{}, fmt.Errorf("docker.RunContainer: inspect: %w", err)
 	}
 
 	port, err := hostPort(inspect.NetworkSettings.Ports, natPort)
 	if err != nil {
+		_ = c.cli.ContainerRemove(context.WithoutCancel(ctx), created.ID, container.RemoveOptions{Force: true, RemoveVolumes: true})
 		return ContainerInfo{}, fmt.Errorf("docker.RunContainer: %w", err)
 	}
 
@@ -126,6 +135,43 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (ContainerStat
 		return ContainerState{Status: "unknown"}, nil
 	}
 	return ContainerState{Status: inspect.State.Status, Running: inspect.State.Running}, nil
+}
+
+func (c *Client) WaitContainerReady(ctx context.Context, id string, port int, opts ReadinessOptions) error {
+	if opts.Timeout <= 0 {
+		opts.Timeout = 60 * time.Second
+	}
+	if opts.Interval <= 0 {
+		opts.Interval = 500 * time.Millisecond
+	}
+	deadlineCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+	dialer := &net.Dialer{Timeout: 750 * time.Millisecond}
+	for {
+		state, err := c.InspectContainer(deadlineCtx, id)
+		if err != nil {
+			return err
+		}
+		if state.Status == "exited" || state.Status == "dead" || state.Status == "missing" {
+			return fmt.Errorf("container %s became %s before readiness", id, state.Status)
+		}
+		if state.Running {
+			conn, dialErr := dialer.DialContext(deadlineCtx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+			if dialErr == nil {
+				_ = conn.Close()
+				return nil
+			}
+		}
+		timer := time.NewTimer(opts.Interval)
+		select {
+		case <-deadlineCtx.Done():
+			if deadlineCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("container %s did not become ready within %s", id, opts.Timeout)
+			}
+			return deadlineCtx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (c *Client) StopContainer(ctx context.Context, id string) error {

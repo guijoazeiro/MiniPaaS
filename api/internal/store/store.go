@@ -18,6 +18,14 @@ type AppStore interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
+type CustomDomainStore interface {
+	Create(ctx context.Context, appID uuid.UUID, hostname string) (domain.CustomDomain, error)
+	Get(ctx context.Context, id uuid.UUID) (domain.CustomDomain, error)
+	ListByApp(ctx context.Context, appID uuid.UUID) ([]domain.CustomDomain, error)
+	UpdateVerification(ctx context.Context, id uuid.UUID, status domain.CustomDomainStatus, lastError string, verifiedAt *time.Time) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 type UserStore interface {
 	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
@@ -54,6 +62,7 @@ type DeploymentStore interface {
 type DeploymentLogStore interface {
 	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
 	List(ctx context.Context, deploymentID uuid.UUID, afterID int64, limit int) ([]domain.DeploymentLog, error)
+	ListHealthCheckFailures(ctx context.Context, appID uuid.UUID, limit int) ([]domain.DeploymentLog, error)
 }
 
 type GitDeploymentStore interface {
@@ -72,6 +81,13 @@ type GitRetryDeploymentStore interface {
 type DeploymentCancellationStore interface {
 	RequestCancel(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
 	MarkCancelled(ctx context.Context, id uuid.UUID) error
+}
+
+type DeploymentCandidateStore interface {
+	UpdateCandidate(ctx context.Context, id uuid.UUID, containerID string, port int) error
+	PromoteCandidate(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error
+	ClearCandidate(ctx context.Context, id uuid.UUID) error
+	ListCandidates(ctx context.Context) ([]domain.Deployment, error)
 }
 
 type GitSourceStore interface {

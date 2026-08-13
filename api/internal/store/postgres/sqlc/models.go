@@ -32,27 +32,40 @@ type AppGitSource struct {
 	AutoDeploy           bool               `json:"auto_deploy"`
 }
 
+type CustomDomain struct {
+	ID         pgtype.UUID        `json:"id"`
+	AppID      pgtype.UUID        `json:"app_id"`
+	Hostname   string             `json:"hostname"`
+	Status     string             `json:"status"`
+	LastError  pgtype.Text        `json:"last_error"`
+	VerifiedAt pgtype.Timestamptz `json:"verified_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Deployment struct {
-	ID               pgtype.UUID        `json:"id"`
-	AppID            pgtype.UUID        `json:"app_id"`
-	ImageTag         string             `json:"image_tag"`
-	Status           string             `json:"status"`
-	ContainerID      pgtype.Text        `json:"container_id"`
-	Port             pgtype.Int4        `json:"port"`
-	CommitSha        pgtype.Text        `json:"commit_sha"`
-	DurationMs       pgtype.Int4        `json:"duration_ms"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
-	SourceType       string             `json:"source_type"`
-	Repository       pgtype.Text        `json:"repository"`
-	Branch           pgtype.Text        `json:"branch"`
-	CommitAuthor     pgtype.Text        `json:"commit_author"`
-	CommitMessage    pgtype.Text        `json:"commit_message"`
-	TriggerType      string             `json:"trigger_type"`
-	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
-	Attempt          int32              `json:"attempt"`
-	RetryOf          pgtype.UUID        `json:"retry_of"`
-	CancelRequested  bool               `json:"cancel_requested"`
+	ID                   pgtype.UUID        `json:"id"`
+	AppID                pgtype.UUID        `json:"app_id"`
+	ImageTag             string             `json:"image_tag"`
+	Status               string             `json:"status"`
+	ContainerID          pgtype.Text        `json:"container_id"`
+	Port                 pgtype.Int4        `json:"port"`
+	CommitSha            pgtype.Text        `json:"commit_sha"`
+	DurationMs           pgtype.Int4        `json:"duration_ms"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	FinishedAt           pgtype.Timestamptz `json:"finished_at"`
+	SourceType           string             `json:"source_type"`
+	Repository           pgtype.Text        `json:"repository"`
+	Branch               pgtype.Text        `json:"branch"`
+	CommitAuthor         pgtype.Text        `json:"commit_author"`
+	CommitMessage        pgtype.Text        `json:"commit_message"`
+	TriggerType          string             `json:"trigger_type"`
+	GithubDeliveryID     pgtype.Text        `json:"github_delivery_id"`
+	Attempt              int32              `json:"attempt"`
+	RetryOf              pgtype.UUID        `json:"retry_of"`
+	CancelRequested      bool               `json:"cancel_requested"`
+	CandidateContainerID pgtype.Text        `json:"candidate_container_id"`
+	CandidatePort        pgtype.Int4        `json:"candidate_port"`
 }
 
 type DeploymentLog struct {

@@ -40,6 +40,21 @@ func (s *DeploymentLogStore) List(ctx context.Context, deploymentID uuid.UUID, a
 	return out, nil
 }
 
+func (s *DeploymentLogStore) ListHealthCheckFailures(ctx context.Context, appID uuid.UUID, limit int) ([]domain.DeploymentLog, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 5
+	}
+	rows, err := s.q.ListHealthCheckLogsByApp(ctx, sqlc.ListHealthCheckLogsByAppParams{AppID: uuidToPG(appID), Lim: int32(limit)})
+	if err != nil {
+		return nil, fmt.Errorf("store.ListHealthCheckFailures: %w", err)
+	}
+	out := make([]domain.DeploymentLog, len(rows))
+	for i, row := range rows {
+		out[i] = toDomainDeploymentLog(row)
+	}
+	return out, nil
+}
+
 func toDomainDeploymentLog(row sqlc.DeploymentLog) domain.DeploymentLog {
 	return domain.DeploymentLog{ID: row.ID, DeploymentID: pgToUUID(row.DeploymentID), Stage: row.Stage, Stream: row.Stream, Message: row.Message, CreatedAt: row.CreatedAt.Time}
 }

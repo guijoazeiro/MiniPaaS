@@ -65,6 +65,8 @@ Phase 10.2 delivers ordered persistent build events and historical deployment lo
 
 ## Phase 11 — Zero-downtime deployments
 
+The baseline rollout is implemented in the API. End-to-end validation with a running Docker/Caddy stack remains before marking this phase complete.
+
 Make releases safe enough for continuously available applications.
 
 ### Deployment strategy
@@ -77,6 +79,8 @@ Make releases safe enough for continuously available applications.
 6. Stop and remove the previous container after a grace period.
 
 If the candidate fails, MiniPaaS keeps the previous deployment serving traffic and records the new deployment as failed.
+
+The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. HTTP health paths, startup grace periods, and resource limits remain follow-up configuration work.
 
 ### Application configuration
 
@@ -91,6 +95,8 @@ If the candidate fails, MiniPaaS keeps the previous deployment serving traffic a
 
 ### Custom domains
 
+Phase 12.1 implements custom-domain persistence, DNS verification, Caddy route lifecycle, and dashboard management. The remaining validation is against a real DNS record and public HTTPS endpoint.
+
 - Attach one or more custom domains to an application.
 - Keep the default MiniPaaS subdomain available.
 - Display pending, verified, and active DNS states.
@@ -100,6 +106,8 @@ If the candidate fails, MiniPaaS keeps the previous deployment serving traffic a
 
 ### Operational metrics
 
+Phase 12.2 implements an on-demand metrics snapshot from Docker and deployment history, with a project-level dashboard panel. Prometheus-compatible export and long-term time-series storage remain future work.
+
 - CPU and memory usage.
 - Container restart count.
 - Uptime and current container state.
@@ -107,7 +115,11 @@ If the candidate fails, MiniPaaS keeps the previous deployment serving traffic a
 - Recent health-check failures.
 - Small per-application charts in the dashboard.
 
-The initial metrics scope should remain lightweight; Prometheus-compatible export can be added later.
+The initial metrics scope remains lightweight; Prometheus-compatible export can be added later.
+
+### Real-time metrics
+
+Phase 12.3 adds a shared Docker stats WebSocket per active container, automatic client reconnection, and a dedicated dashboard page with rolling CPU, memory, network, and disk charts. Long-term time-series persistence and alerting remain future work.
 
 ## Cross-cutting security and reliability
 

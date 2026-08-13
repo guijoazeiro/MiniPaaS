@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -58,7 +59,36 @@ func (c *Client) UpsertRoute(ctx context.Context, appName string, port int) (str
 		return "", fmt.Errorf("caddy.UpsertRoute: delete existing: %w", err)
 	}
 
-	route := map[string]any{
+	route := routeConfig(host, id, port)
+
+	if err := c.post(ctx, "/config/apps/http/servers/"+serverName+"/routes", route, "UpsertRoute"); err != nil {
+		return "", err
+	}
+	return "https://" + host, nil
+}
+
+// SwitchRoute replaces an existing route in one Caddy API request. Caddy's
+// /id endpoint uses PATCH for an in-place object update; PUT can append the
+// object while the existing route is still indexed and result in duplicate
+// route IDs. If this is the first deployment and the route does not exist yet,
+// it creates it.
+func (c *Client) SwitchRoute(ctx context.Context, appName string, port int) (string, error) {
+	id := routeID(appName)
+	host := appName + "." + c.baseDomain
+	route := routeConfig(host, id, port)
+	if err := c.patch(ctx, "/id/"+id, route, "SwitchRoute"); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "unknown object id") && !strings.Contains(err.Error(), " 404 ") {
+			return "", err
+		}
+		if err := c.post(ctx, "/config/apps/http/servers/"+serverName+"/routes", route, "SwitchRouteCreate"); err != nil {
+			return "", err
+		}
+	}
+	return "https://" + host, nil
+}
+
+func routeConfig(host, id string, port int) map[string]any {
+	return map[string]any{
 		"@id":   id,
 		"match": []map[string]any{{"host": []string{host}}},
 		"handle": []map[string]any{{
@@ -67,18 +97,34 @@ func (c *Client) UpsertRoute(ctx context.Context, appName string, port int) (str
 		}},
 		"terminal": true,
 	}
-
-	if err := c.post(ctx, "/config/apps/http/servers/"+serverName+"/routes", route, "UpsertRoute"); err != nil {
-		return "", err
-	}
-	return "https://" + host, nil
 }
 
 func (c *Client) RemoveRoute(ctx context.Context, appName string) error {
 	return c.deleteByID(ctx, routeID(appName))
 }
 
+// SwitchCustomRoute updates the route owned by a custom-domain record. The
+// record ID is used in the Caddy @id so hostnames can be changed without
+// leaving an old route behind.
+func (c *Client) SwitchCustomRoute(ctx context.Context, domainID, hostname string, port int) error {
+	id := customRouteID(domainID)
+	route := routeConfig(hostname, id, port)
+	if err := c.patch(ctx, "/id/"+id, route, "SwitchCustomRoute"); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "unknown object id") && !strings.Contains(err.Error(), " 404 ") {
+			return err
+		}
+		return c.post(ctx, "/config/apps/http/servers/"+serverName+"/routes", route, "SwitchCustomRouteCreate")
+	}
+	return nil
+}
+
+func (c *Client) RemoveCustomRoute(ctx context.Context, domainID string) error {
+	return c.deleteByID(ctx, customRouteID(domainID))
+}
+
 func routeID(appName string) string { return "minipaas-" + appName }
+
+func customRouteID(domainID string) string { return "minipaas-domain-" + domainID }
 
 func (c *Client) deleteByID(ctx context.Context, id string) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, c.base+"/id/"+id, nil)
@@ -104,6 +150,10 @@ func (c *Client) put(ctx context.Context, path string, body any, op string) erro
 
 func (c *Client) post(ctx context.Context, path string, body any, op string) error {
 	return c.do(ctx, http.MethodPost, path, body, op)
+}
+
+func (c *Client) patch(ctx context.Context, path string, body any, op string) error {
+	return c.do(ctx, http.MethodPatch, path, body, op)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, op string) error {
