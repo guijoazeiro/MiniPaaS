@@ -103,7 +103,28 @@ func (c *Client) RemoveRoute(ctx context.Context, appName string) error {
 	return c.deleteByID(ctx, routeID(appName))
 }
 
+// SwitchCustomRoute updates the route owned by a custom-domain record. The
+// record ID is used in the Caddy @id so hostnames can be changed without
+// leaving an old route behind.
+func (c *Client) SwitchCustomRoute(ctx context.Context, domainID, hostname string, port int) error {
+	id := customRouteID(domainID)
+	route := routeConfig(hostname, id, port)
+	if err := c.patch(ctx, "/id/"+id, route, "SwitchCustomRoute"); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "unknown object id") && !strings.Contains(err.Error(), " 404 ") {
+			return err
+		}
+		return c.post(ctx, "/config/apps/http/servers/"+serverName+"/routes", route, "SwitchCustomRouteCreate")
+	}
+	return nil
+}
+
+func (c *Client) RemoveCustomRoute(ctx context.Context, domainID string) error {
+	return c.deleteByID(ctx, customRouteID(domainID))
+}
+
 func routeID(appName string) string { return "minipaas-" + appName }
+
+func customRouteID(domainID string) string { return "minipaas-domain-" + domainID }
 
 func (c *Client) deleteByID(ctx context.Context, id string) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, c.base+"/id/"+id, nil)

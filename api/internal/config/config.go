@@ -17,6 +17,7 @@ type Config struct {
 	DockerHost              string
 	CaddyAdminURL           string
 	BaseDomain              string
+	PublicIP                string
 	EncryptionKey           []byte
 	JWTSecret               string
 	TokenTTL                time.Duration
@@ -114,6 +115,7 @@ func Load() (*Config, error) {
 		DockerHost:              os.Getenv("DOCKER_HOST"),
 		CaddyAdminURL:           caddyURL,
 		BaseDomain:              baseDomain,
+		PublicIP:                strings.TrimSpace(os.Getenv("PUBLIC_IP")),
 		EncryptionKey:           encKey,
 		JWTSecret:               jwtSecret,
 		TokenTTL:                ttl,

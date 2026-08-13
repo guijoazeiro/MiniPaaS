@@ -51,8 +51,9 @@ type DeploymentLogWriter interface {
 }
 
 type DeploymentServiceOptions struct {
-	Logs         DeploymentLogWriter
-	ReadyTimeout time.Duration
+	Logs          DeploymentLogWriter
+	ReadyTimeout  time.Duration
+	CustomDomains CustomDomainRouteSync
 }
 
 type DeploymentService struct {
@@ -68,6 +69,7 @@ type DeploymentService struct {
 	log               *slog.Logger
 	logs              DeploymentLogWriter
 	readyTimeout      time.Duration
+	customDomains     CustomDomainRouteSync
 	executionsMu      sync.Mutex
 	executions        map[uuid.UUID]*deploymentExecution
 	rolloutsMu        sync.Mutex
@@ -84,6 +86,7 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 	}
 	var logWriter DeploymentLogWriter
 	readyTimeout := 60 * time.Second
+	var customRoutes CustomDomainRouteSync
 	for _, option := range options {
 		if option.Logs != nil {
 			logWriter = option.Logs
@@ -91,11 +94,15 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		if option.ReadyTimeout > 0 {
 			readyTimeout = option.ReadyTimeout
 		}
+		if option.CustomDomains != nil {
+			customRoutes = option.CustomDomains
+		}
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
 		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter, readyTimeout: readyTimeout,
+		customDomains: customRoutes,
 		executions: make(map[uuid.UUID]*deploymentExecution),
 		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
@@ -382,9 +389,26 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: switch route: %w", err)
 	}
+	if s.customDomains != nil {
+		if err := s.customDomains.SyncRoutes(ctx, app.ID, info.Port); err != nil {
+			if previous.ContainerID != "" {
+				_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			} else {
+				_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
+			}
+			cleanupCandidate(context.WithoutCancel(ctx))
+			s.event(ctx, dep.ID, "error", "stderr", "rotas de domínios customizados falharam: "+err.Error())
+			s.markFailed(ctx, dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: sync custom domains: %w", err)
+		}
+	}
 	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
 		if previous.ContainerID != "" {
 			_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+			if s.customDomains != nil {
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			}
 		} else {
 			_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
 		}
@@ -400,6 +424,9 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		if ctx.Err() != nil {
 			if previous.ContainerID != "" {
 				_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+				if s.customDomains != nil {
+					_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+				}
 			} else {
 				_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
 			}
@@ -408,6 +435,9 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		}
 		if previous.ContainerID != "" {
 			_, _ = s.switchRoute(context.WithoutCancel(ctx), app.Name, previous.Port)
+			if s.customDomains != nil {
+				_ = s.customDomains.SyncRoutes(context.WithoutCancel(ctx), app.ID, previous.Port)
+			}
 		} else {
 			_ = s.caddy.RemoveRoute(context.WithoutCancel(ctx), app.Name)
 		}
@@ -502,6 +532,11 @@ func (s *DeploymentService) RecoverCandidates(ctx context.Context) error {
 		if previousErr == nil && appErr == nil && previous.ContainerID != "" {
 			if _, routeErr := s.switchRoute(ctx, app.Name, previous.Port); routeErr != nil {
 				s.log.Warn("restore route for orphan candidate", "app", app.Name, "deployment", candidate.ID, "err", routeErr)
+			}
+			if s.customDomains != nil {
+				if syncErr := s.customDomains.SyncRoutes(ctx, candidate.AppID, previous.Port); syncErr != nil {
+					s.log.Warn("restore custom routes for orphan candidate", "app", app.Name, "deployment", candidate.ID, "err", syncErr)
+				}
 			}
 		} else if appErr == nil {
 			if routeErr := s.caddy.RemoveRoute(ctx, app.Name); routeErr != nil {
@@ -659,6 +694,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
 		s.log.Warn("rollback: update public url", "err", err)
 	}
+	if s.customDomains != nil {
+		if err := s.customDomains.SyncRoutes(ctx, app.ID, info.Port); err != nil {
+			s.log.Warn("rollback: custom domain routes", "err", err)
+		}
+	}
 
 	if err := s.rollbacks.Record(ctx, app.ID, fromID, target.ID, triggeredBy); err != nil {
 		s.log.Warn("rollback: history", "err", err)
@@ -703,6 +743,11 @@ func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
 
 	if err := s.caddy.RemoveRoute(ctx, app.Name); err != nil {
 		s.log.Warn("caddy remove route", "app", app.Name, "err", err)
+	}
+	if s.customDomains != nil {
+		if err := s.customDomains.RemoveRoutes(ctx, app.ID); err != nil {
+			s.log.Warn("remove custom domain routes", "app", app.Name, "err", err)
+		}
 	}
 	dep, err := s.deps.GetActive(ctx, app.ID)
 	if err != nil {

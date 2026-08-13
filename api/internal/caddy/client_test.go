@@ -100,6 +100,23 @@ func TestSwitchRouteCreatesWhenIDDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestSwitchCustomRouteUsesStableDomainID(t *testing.T) {
+	f := &fakeCaddy{}
+	c := newClient(t, f)
+	if err := c.SwitchCustomRoute(context.Background(), "domain-123", "api.example.com", 4321); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests) != 1 || f.requests[0].Method != http.MethodPatch || f.requests[0].Path != "/id/minipaas-domain-domain-123" {
+		t.Fatalf("requests = %+v", f.requests)
+	}
+	if err := c.RemoveCustomRoute(context.Background(), "domain-123"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests) != 2 || f.requests[1].Method != http.MethodDelete {
+		t.Fatalf("remove requests = %+v", f.requests)
+	}
+}
+
 func newClient(t *testing.T, f *fakeCaddy) *Client {
 	t.Helper()
 	srv := httptest.NewServer(f.handler())

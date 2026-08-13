@@ -72,6 +72,7 @@ func main() {
 	q := sqlc.New(pool)
 	appStore := postgres.NewAppStore(q)
 	depStore := postgres.NewDeploymentStore(q)
+	domainStore := postgres.NewCustomDomainStore(q)
 	depLogStore := postgres.NewDeploymentLogStore(q)
 	userStore := postgres.NewUserStore(q)
 	envStore := postgres.NewEnvStore(q)
@@ -97,7 +98,8 @@ func main() {
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout})
+	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout, CustomDomains: domainSvc})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
 	}
@@ -123,6 +125,7 @@ func main() {
 
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
+	domainH := handler.NewCustomDomainHandler(domainSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize, depLogStore, gitDepSvc)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
@@ -155,6 +158,10 @@ func main() {
 	auth.GET("/apps/:name", appH.Get)
 	auth.POST("/apps/:name/stop", appH.Stop)
 	auth.DELETE("/apps/:name", appH.Delete)
+	auth.GET("/apps/:name/domains", domainH.List)
+	auth.POST("/apps/:name/domains", domainH.Create)
+	auth.POST("/apps/:name/domains/:domainID/verify", domainH.Verify)
+	auth.DELETE("/apps/:name/domains/:domainID", domainH.Delete)
 
 	auth.POST("/apps/:name/deployments", depH.Create)
 	auth.GET("/deployments", depH.ListAll)
