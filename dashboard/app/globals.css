@@ -21,7 +21,21 @@
 .deployment-log-line span { color: var(--violet-ink); }
 .deployment-log-line.stderr { color: var(--bad); }
 .text-button.danger { color: var(--bad); }
+.custom-domain-panel { min-height: 230px; }
+.panel-description { margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.custom-domain-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 17px 0; }
+.custom-domain-form input { min-width: 0; min-height: 39px; font: 11px var(--font-geist-mono), monospace; }
+.custom-domain-form .button { min-height: 39px; }
+.custom-domain-list { display: grid; }
+.custom-domain-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 2px; border-top: 1px solid var(--line); }
+.custom-domain-copy { min-width: 0; flex: 1; }
+.custom-domain-copy strong { display: block; overflow: hidden; color: var(--ink); font: 12px var(--font-geist-mono), monospace; text-overflow: ellipsis; white-space: nowrap; }
+.custom-domain-copy small { display: block; margin-top: 5px; overflow: hidden; color: var(--bad); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.status-pill.active { color: var(--good); }
+.status-pill.verified { color: var(--violet-ink); }
+.status-pill.error { color: var(--bad); }
 @media (max-width: 640px) { .landing-nav, .landing-hero, .capabilities { width: min(100% - 32px, 1280px); }.landing-nav-actions .secondary { display: none; }.landing-hero { padding-top: 12px; }.hero-copy h1 { font-size: clamp(54px, 18vw, 76px); }.hero-description { font-size: 14px; }.hero-actions { align-items: flex-start; flex-direction: column; }.hero-art { grid-template-columns: 45px 1fr; min-height: 420px; border-radius: 12px; }.art-rail { gap: 22px; padding-top: 23px; }.art-content { padding: 23px 15px 16px; }.art-title strong { font-size: 17px; }.art-title button { display: none; }.art-metrics { gap: 7px; }.art-metrics strong { font-size: 20px; }.art-head, .art-row { grid-template-columns: 1fr .75fr; }.art-head span:last-child, .art-row > span:last-child { display: none; }.art-footer small { display: none; }.hero-grid { display: none; } }
+@media (max-width: 640px) { .custom-domain-form { grid-template-columns: 1fr; }.custom-domain-row { align-items: flex-start; flex-wrap: wrap; }.custom-domain-row .status-pill { margin-left: 0; }.custom-domain-copy { flex-basis: 100%; } }
 
 /* Scroll do terminal: estreito, técnico e consistente entre navegadores. */
 .log-output {

@@ -10,6 +10,17 @@ export type App = {
   updated_at: string;
 };
 
+export type CustomDomain = {
+  id: string;
+  app_id: string;
+  hostname: string;
+  status: "pending" | "verified" | "active" | "error";
+  last_error?: string;
+  verified_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Deployment = {
   id: string;
   app_id: string;
