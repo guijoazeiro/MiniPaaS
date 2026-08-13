@@ -34,7 +34,7 @@ export function MetricsPanel({ metrics }: { metrics: AppMetrics | null }) {
       </div>
 
       <div className="runtime-metric-grid">
-        <article><span>CPU</span><strong>{runtime ? `${runtime.cpu_percent.toFixed(1)}%` : "—"}</strong><small>uso instantâneo</small></article>
+        <article><span>CPU</span><strong>{runtime ? `${runtime.cpu_percent.toFixed(2)}%` : "—"}</strong><small>uso instantâneo</small></article>
         <article><span>Memória</span><strong>{runtime ? `${runtime.memory_percent.toFixed(1)}%` : "—"}</strong><small>{runtime ? `${formatBytes(runtime.memory_usage_bytes)} / ${formatBytes(runtime.memory_limit_bytes)}` : "sem snapshot"}</small></article>
         <article><span>Uptime</span><strong>{formatUptime(runtime?.uptime_seconds || 0)}</strong><small>{runtime?.state ? stateLabel(runtime.state) : "sem container"}</small></article>
         <article><span>Restarts</span><strong>{runtime?.restart_count ?? "—"}</strong><small>desde a inicialização</small></article>

@@ -424,7 +424,7 @@ export function ProjectDetails({ name }: { name: string }) {
     <>
       <header className="project-heading">
         <div><Link className="back-link" href="/dashboard/projects">Voltar para projetos</Link><div className="project-title-line"><h1>{app.name}</h1><span className={`status-pill ${app.status}`}><i />{stateLabel(app.status)}</span></div><p className="page-description">Atualizado em {formatTime(app.updated_at)}</p></div>
-        <div className="project-heading-actions">{app.public_url && <a className="button secondary button-link" href={app.public_url} target="_blank" rel="noreferrer">Abrir aplicação</a>}<Link className="button secondary button-link" href={`/dashboard/logs?app=${encodeURIComponent(name)}`}>Logs em tela cheia</Link></div>
+        <div className="project-heading-actions">{app.public_url && <a className="button secondary button-link" href={app.public_url} target="_blank" rel="noreferrer">Abrir aplicação</a>}<Link className="button secondary button-link" href={`/dashboard/metrics?app=${encodeURIComponent(name)}`}>Ver métricas</Link><Link className="button secondary button-link" href={`/dashboard/logs?app=${encodeURIComponent(name)}`}>Logs em tela cheia</Link></div>
       </header>
 
       <nav className="project-tabs" aria-label="Seções do projeto">{tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => changeTab(item.id)}>{item.label}</button>)}</nav>

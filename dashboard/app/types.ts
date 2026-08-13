@@ -34,6 +34,11 @@ export type AppMetrics = {
     memory_usage_bytes: number;
     memory_limit_bytes: number;
     memory_percent: number;
+    network_rx_bytes: number;
+    network_tx_bytes: number;
+    block_read_bytes: number;
+    block_write_bytes: number;
+    pids: number;
   };
   deployments: {
     total: number;
@@ -48,6 +53,27 @@ export type AppMetrics = {
     message: string;
     created_at: string;
   }>;
+};
+
+export type MetricsPoint = {
+  ts: string;
+  cpu_percent: number;
+  memory_percent: number;
+  memory_usage_bytes: number;
+  network_rx_bytes: number;
+  network_tx_bytes: number;
+  block_read_bytes: number;
+  block_write_bytes: number;
+};
+
+export type LiveMetricsSnapshot = MetricsPoint & {
+  state: string;
+  restart_count: number;
+  uptime_seconds: number;
+  started_at?: string;
+  memory_limit_bytes: number;
+  pids: number;
+  container_id?: string;
 };
 
 export type Deployment = {
