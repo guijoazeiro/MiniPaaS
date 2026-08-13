@@ -36,7 +36,7 @@ func TestGitSourceAndDeploymentMetadataIntegration(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = apps.Delete(context.Background(), app.ID) })
 
-	source, err := sources.Upsert(ctx, domain.GitSource{AppID: app.ID, Repository: "owner/repository", Branch: "main", BuildContext: "services/api", DockerfilePath: "Dockerfile"})
+	source, err := sources.Upsert(ctx, domain.GitSource{AppID: app.ID, Repository: "owner/repository", Branch: "main", BuildContext: "services/api", DockerfilePath: "Dockerfile", AccessMode: domain.GitAccessPublic})
 	if err != nil {
 		t.Fatal(err)
 	}
