@@ -99,6 +99,7 @@ func main() {
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
+	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
 	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout, CustomDomains: domainSvc})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
@@ -126,6 +127,7 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	domainH := handler.NewCustomDomainHandler(domainSvc, log)
+	metricsH := handler.NewMetricsHandler(metricsSvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize, depLogStore, gitDepSvc)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
@@ -158,6 +160,7 @@ func main() {
 	auth.GET("/apps/:name", appH.Get)
 	auth.POST("/apps/:name/stop", appH.Stop)
 	auth.DELETE("/apps/:name", appH.Delete)
+	auth.GET("/apps/:name/metrics", metricsH.Get)
 	auth.GET("/apps/:name/domains", domainH.List)
 	auth.POST("/apps/:name/domains", domainH.Create)
 	auth.POST("/apps/:name/domains/:domainID/verify", domainH.Verify)
