@@ -135,7 +135,9 @@ These controls should be implemented alongside the phases above rather than post
 - Run builds with constrained CPU, memory, network, and filesystem access where feasible.
 - Guarantee cleanup of temporary directories, failed containers, and unused images.
 - Record an audit trail for deploys, rollbacks, environment changes, domain changes, and authentication events.
-- Add database backup and restore documentation before treating the platform as production-ready.
+- ✅ Add database backup and restore documentation before treating the platform as production-ready.
+
+Phase 13 now provides request correlation, sensitive-endpoint rate limiting, optional container resource caps, readiness probes, startup reconciliation of labeled orphan containers, and documented PostgreSQL backup/restore procedures. Audit-log persistence, distributed rate-limit state, and per-application resource settings remain follow-up work for a multi-tenant production release.
 
 ## Later opportunities
 
@@ -165,3 +167,4 @@ The strongest next sequence for product value and portfolio depth is:
 4. Persistent and streamed build logs.
 5. Zero-downtime route switching with readiness checks.
 6. Custom domains and lightweight metrics.
+7. Backend hardening: limits, correlation, readiness, reconciliation, and recovery drills.
