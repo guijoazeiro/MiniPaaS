@@ -52,6 +52,15 @@ type Deployment struct {
 	GitHubDeliveryID string `json:"github_delivery_id,omitempty"`
 }
 
+type DeploymentLog struct {
+	ID           int64  `json:"id"`
+	DeploymentID string `json:"deployment_id"`
+	Stage        string `json:"stage"`
+	Stream       string `json:"stream"`
+	Message      string `json:"message"`
+	CreatedAt    string `json:"created_at"`
+}
+
 type GitSource struct {
 	AppID                string `json:"app_id"`
 	Repository           string `json:"repository"`
@@ -229,6 +238,15 @@ func (c *Client) GetDeployment(app, id string) (*Deployment, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) ListDeploymentLogs(app, id string, after, limit int64) ([]DeploymentLog, error) {
+	path := fmt.Sprintf("/apps/%s/deployments/%s/logs?after=%d&limit=%d", app, id, after, limit)
+	var out []DeploymentLog
+	if err := c.doJSON(http.MethodGet, path, nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) doJSON(method, path string, body io.Reader, contentType string, out any) error {
