@@ -133,8 +133,8 @@ func main() {
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
-	wsH := wspkg.New(appStore, dockerCli, depStore, log)
-	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log)
+	wsH := wspkg.New(appStore, dockerCli, depStore, log, cfg.DashboardOrigin)
+	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log, cfg.DashboardOrigin)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)

@@ -168,12 +168,12 @@ type MetricsStreamHandler struct {
 	log      *slog.Logger
 }
 
-func NewMetricsStreamHandler(apps AppLookup, deps DeploymentLookup, dockerClient DockerMetricsStream, log *slog.Logger) *MetricsStreamHandler {
+func NewMetricsStreamHandler(apps AppLookup, deps DeploymentLookup, dockerClient DockerMetricsStream, log *slog.Logger, dashboardOrigin ...string) *MetricsStreamHandler {
 	return &MetricsStreamHandler{
 		apps:     apps,
 		deps:     deps,
 		hub:      NewMetricsHub(dockerClient),
-		upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		upgrader: websocket.Upgrader{CheckOrigin: websocketOriginChecker(dashboardOrigin...)},
 		log:      log,
 	}
 }
