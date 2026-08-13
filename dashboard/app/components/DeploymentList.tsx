@@ -5,9 +5,10 @@ type Props = {
   deployments: Deployment[];
   rollingBackID: string;
   onRollback: (deploymentID: string) => void;
+  onViewLogs: (deploymentID: string) => void;
 };
 
-export function DeploymentList({ deployments, rollingBackID, onRollback }: Props) {
+export function DeploymentList({ deployments, rollingBackID, onRollback, onViewLogs }: Props) {
   return (
     <section id="deployments" className="panel glass">
       <div className="section-heading"><div><p className="eyebrow">HISTÓRICO</p><h2>Deploys recentes</h2></div><span className="count">{deployments.length}</span></div>
@@ -22,6 +23,7 @@ export function DeploymentList({ deployments, rollingBackID, onRollback }: Props
               <small>{formatTime(deployment.created_at)} · {formatDuration(deployment.duration_ms)}{deployment.port ? ` · porta ${deployment.port}` : ""}</small>
             </div>
             <span className={`status-pill compact ${deployment.status}`}><i />{stateLabel(deployment.status)}</span>
+            <button className="text-button" onClick={() => onViewLogs(deployment.id)}>Logs de build</button>
             {["superseded", "rolled_back", "stopped"].includes(deployment.status) && (
               <button className="text-button" onClick={() => onRollback(deployment.id)} disabled={Boolean(rollingBackID)}>{rollingBackID === deployment.id ? "Revertendo…" : deployment.status === "stopped" ? "Reativar" : "Rollback"}</button>
             )}

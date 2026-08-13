@@ -8,6 +8,7 @@ import { useLogStream } from "../hooks/useLogStream";
 import type { App, Deployment, EnvKey, GitHubInstallation, GitHubRepository, GitSource } from "../types";
 import { DeployPanel } from "./DeployPanel";
 import { DeploymentList } from "./DeploymentList";
+import { DeploymentLogsPanel } from "./DeploymentLogsPanel";
 import { EnvPanel } from "./EnvPanel";
 import { GitDeployPanel } from "./GitDeployPanel";
 import { LogViewer } from "./LogViewer";
@@ -164,6 +165,10 @@ export function ProjectDetails({ name }: { name: string }) {
 
   function changeTab(nextTab: Tab) {
     router.replace(nextTab === "overview" ? `/dashboard/projects/${encodeURIComponent(name)}` : `/dashboard/projects/${encodeURIComponent(name)}?tab=${nextTab}`);
+  }
+
+  function viewDeploymentLogs(deploymentID: string) {
+    router.replace(`/dashboard/projects/${encodeURIComponent(name)}?tab=logs&deployment=${encodeURIComponent(deploymentID)}`);
   }
 
   async function deploy(event: FormEvent<HTMLFormElement>) {
@@ -343,8 +348,8 @@ export function ProjectDetails({ name }: { name: string }) {
       <nav className="project-tabs" aria-label="Seções do projeto">{tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => changeTab(item.id)}>{item.label}</button>)}</nav>
 
       {tab === "overview" && <div className="project-section-stack"><DeployPanel app={app} deployments={deployments} deployFile={deployFile} deploying={deploying} stopping={stoppingApp} confirmingStop={confirmingStop} onFileChange={setDeployFile} onDeploy={deploy} onCreate={() => undefined} onRequestStop={stopApp} onCancelStop={() => setConfirmingStop(false)} /><section className="panel project-summary"><div className="section-heading"><div><p className="eyebrow">ÚLTIMA ATIVIDADE</p><h2>Resumo operacional</h2></div></div><div className="summary-grid"><div><span>Origem</span><strong>{gitSource ? "GitHub" : "Upload manual"}</strong><small>{gitSource?.repository || "Nenhum repositório conectado"}</small></div><div><span>Deployments</span><strong>{deployments.length}</strong><small>{deployments[0] ? `Último: ${stateLabel(deployments[0].status)}` : "Nenhum release"}</small></div><div><span>Variáveis</span><strong>{envKeys.length}</strong><small>nomes configurados</small></div></div></section></div>}
-      {tab === "deployments" && <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} />}
-      {tab === "logs" && <LogViewer logs={logStream.logs} outputRef={logStream.outputRef} following={logStream.following} connection={logStream.connection} dedicated onScroll={logStream.handleScroll} onResume={logStream.resumeFollowing} onClear={logStream.clearLogs} />}
+      {tab === "deployments" && <DeploymentList deployments={deployments} rollingBackID={rollingBackID} onRollback={rollback} onViewLogs={viewDeploymentLogs} />}
+      {tab === "logs" && <div className="project-section-stack">{searchParams.get("deployment") && <DeploymentLogsPanel appName={name} deploymentID={searchParams.get("deployment")!} />}<LogViewer logs={logStream.logs} outputRef={logStream.outputRef} following={logStream.following} connection={logStream.connection} dedicated onScroll={logStream.handleScroll} onResume={logStream.resumeFollowing} onClear={logStream.clearLogs} /></div>}
       {tab === "settings" && <div className="project-section-stack"><GitDeployPanel source={gitSource} mode={gitMode} repository={gitRepository} branch={gitBranch} buildContext={gitBuildContext} dockerfilePath={gitDockerfile} githubEnabled={githubEnabled} githubLoading={githubLoading} webhooksEnabled={githubWebhooksEnabled} installations={githubInstallations} repositories={githubRepositories} selectedInstallationID={githubInstallationID} selectedRepositoryID={githubRepositoryID} saving={savingGit} deploying={deployingGit} disconnecting={disconnectingGit} togglingAutoDeploy={togglingAutoDeploy} onModeChange={setGitMode} onRepositoryChange={setGitRepository} onBranchChange={setGitBranch} onBuildContextChange={setGitBuildContext} onDockerfilePathChange={setGitDockerfile} onInstallationChange={selectGitHubInstallation} onPrivateRepositoryChange={selectPrivateRepository} onInstallGitHubApp={installGitHubApp} onToggleAutoDeploy={toggleAutoDeploy} onSave={saveGitSource} onDeploy={deployGit} onDisconnect={disconnectGit} /><EnvPanel envKeys={envKeys} envName={envName} envValue={envValue} saving={savingEnv} deletingKey={deletingEnvKey} onNameChange={setEnvName} onValueChange={setEnvValue} onSave={saveEnv} onDelete={deleteEnv} /></div>}
     </>
   );

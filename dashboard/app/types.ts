@@ -36,6 +36,15 @@ export type DeploymentPage = {
   total: number;
 };
 
+export type DeploymentLog = {
+  id: number;
+  deployment_id: string;
+  stage: string;
+  stream: "stdout" | "stderr" | "system";
+  message: string;
+  created_at: string;
+};
+
 export type GitSource = {
   app_id: string;
   repository: string;
