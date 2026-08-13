@@ -62,6 +62,7 @@ type DeploymentStore interface {
 type DeploymentLogStore interface {
 	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
 	List(ctx context.Context, deploymentID uuid.UUID, afterID int64, limit int) ([]domain.DeploymentLog, error)
+	ListHealthCheckFailures(ctx context.Context, appID uuid.UUID, limit int) ([]domain.DeploymentLog, error)
 }
 
 type GitDeploymentStore interface {

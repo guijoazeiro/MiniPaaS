@@ -637,6 +637,48 @@ func (q *Queries) ListDeploymentsForRetention(ctx context.Context, arg ListDeplo
 	return items, nil
 }
 
+const listHealthCheckLogsByApp = `-- name: ListHealthCheckLogsByApp :many
+SELECT l.id, l.deployment_id, l.stage, l.stream, l.message, l.created_at
+FROM deployment_logs l
+JOIN deployments d ON d.id = l.deployment_id
+WHERE d.app_id = $1
+  AND l.stage = 'health_check'
+ORDER BY l.created_at DESC
+LIMIT $2
+`
+
+type ListHealthCheckLogsByAppParams struct {
+	AppID pgtype.UUID `json:"app_id"`
+	Lim   int32       `json:"lim"`
+}
+
+func (q *Queries) ListHealthCheckLogsByApp(ctx context.Context, arg ListHealthCheckLogsByAppParams) ([]DeploymentLog, error) {
+	rows, err := q.db.Query(ctx, listHealthCheckLogsByApp, arg.AppID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeploymentLog
+	for rows.Next() {
+		var i DeploymentLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeploymentID,
+			&i.Stage,
+			&i.Stream,
+			&i.Message,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningDeployments = `-- name: ListRunningDeployments :many
 SELECT id, app_id, image_tag, status, container_id, port, commit_sha, duration_ms, created_at, finished_at, source_type, repository, branch, commit_author, commit_message, trigger_type, github_delivery_id, attempt, retry_of, cancel_requested, candidate_container_id, candidate_port FROM deployments WHERE status = 'running'
 `

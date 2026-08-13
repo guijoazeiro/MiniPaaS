@@ -138,3 +138,12 @@ WHERE deployment_id = @deployment_id
   AND id > @after_id
 ORDER BY id ASC
 LIMIT @lim;
+
+-- name: ListHealthCheckLogsByApp :many
+SELECT l.*
+FROM deployment_logs l
+JOIN deployments d ON d.id = l.deployment_id
+WHERE d.app_id = @app_id
+  AND l.stage = 'health_check'
+ORDER BY l.created_at DESC
+LIMIT @lim;
