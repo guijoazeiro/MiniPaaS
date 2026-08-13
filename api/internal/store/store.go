@@ -18,6 +18,14 @@ type AppStore interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
+type CustomDomainStore interface {
+	Create(ctx context.Context, appID uuid.UUID, hostname string) (domain.CustomDomain, error)
+	Get(ctx context.Context, id uuid.UUID) (domain.CustomDomain, error)
+	ListByApp(ctx context.Context, appID uuid.UUID) ([]domain.CustomDomain, error)
+	UpdateVerification(ctx context.Context, id uuid.UUID, status domain.CustomDomainStatus, lastError string, verifiedAt *time.Time) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 type UserStore interface {
 	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)

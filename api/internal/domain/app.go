@@ -25,6 +25,26 @@ type App struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+type CustomDomainStatus string
+
+const (
+	CustomDomainStatusPending  CustomDomainStatus = "pending"
+	CustomDomainStatusVerified CustomDomainStatus = "verified"
+	CustomDomainStatusActive   CustomDomainStatus = "active"
+	CustomDomainStatusError    CustomDomainStatus = "error"
+)
+
+type CustomDomain struct {
+	ID         uuid.UUID          `json:"id"`
+	AppID      uuid.UUID          `json:"app_id"`
+	Hostname   string             `json:"hostname"`
+	Status     CustomDomainStatus `json:"status"`
+	LastError  string             `json:"last_error,omitempty"`
+	VerifiedAt *time.Time         `json:"verified_at,omitempty"`
+	CreatedAt  time.Time          `json:"created_at"`
+	UpdatedAt  time.Time          `json:"updated_at"`
+}
+
 type DeploymentStatus string
 
 const (

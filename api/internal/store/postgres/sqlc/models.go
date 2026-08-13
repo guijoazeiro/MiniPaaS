@@ -32,6 +32,17 @@ type AppGitSource struct {
 	AutoDeploy           bool               `json:"auto_deploy"`
 }
 
+type CustomDomain struct {
+	ID         pgtype.UUID        `json:"id"`
+	AppID      pgtype.UUID        `json:"app_id"`
+	Hostname   string             `json:"hostname"`
+	Status     string             `json:"status"`
+	LastError  pgtype.Text        `json:"last_error"`
+	VerifiedAt pgtype.Timestamptz `json:"verified_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Deployment struct {
 	ID                   pgtype.UUID        `json:"id"`
 	AppID                pgtype.UUID        `json:"app_id"`
