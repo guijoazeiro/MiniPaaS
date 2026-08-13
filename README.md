@@ -319,6 +319,7 @@ POST   /apps/:name/rollback           { deployment_id } → Deployment (restored
 
 WS     /apps/:name/logs?follow=true&tail=100     (active deployment, or latest failed deployment with logs)
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
+GET    /apps/:name/deployments/:id/logs?after=0&limit=500 (persisted build events)
 ```
 
 Rollback is synchronous: the API responds after Docker starts the selected image and Caddy updates its route.
@@ -463,6 +464,29 @@ After restarting the API, enable auto-deploy from **Projeto → Configurações 
 ```
 
 MiniPaaS validates `X-Hub-Signature-256` with HMAC-SHA256 before processing the body, deduplicates deliveries using `X-GitHub-Delivery`, and only starts a deployment when repository, installation, and branch all match. Deleting a branch, pushing another branch, or replaying the same delivery does not create another deployment. Releases created from a push expose `trigger_type=webhook` and their GitHub delivery ID.
+
+### Persistent build logs (Phase 10.2)
+
+Each deployment now records ordered build events in PostgreSQL. Events include the source clone, Docker build output, container start, health-check handoff, route publication, cleanup, and failures. Runtime logs remain available through the existing WebSocket stream; build history is independent and can be opened after a deployment has finished.
+
+The API endpoint is:
+
+```text
+GET /apps/:name/deployments/:id/logs?after=0&limit=500
+```
+
+In the dashboard, open **Deployments → Logs de build** for a release. The CLI exposes the same history without starting a live stream:
+
+```powershell
+.\minip.exe logs hello --deployment <deployment-id>
+```
+
+Apply migration 010 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
 
 ## Project layout
 
