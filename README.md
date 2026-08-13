@@ -726,6 +726,8 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 
 Authentication (`/auth/login` and `/auth/web-login`) and the GitHub webhook endpoint return `429 Too Many Requests` with `Retry-After` when their fixed-window limit is reached. The limiter is intentionally in memory and per API process; a multi-instance deployment must move this state to a shared store. The key uses the direct peer address and does not trust arbitrary `X-Forwarded-For` headers.
 
+Every API response includes an `X-Request-ID` UUID. A valid incoming UUID is preserved for correlation; malformed values are replaced. The same ID is included in the structured HTTP request log entry.
+
 When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited; per-application limits and build-time isolation are still future work.
 
 ## Development

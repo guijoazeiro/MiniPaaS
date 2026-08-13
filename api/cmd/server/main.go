@@ -145,7 +145,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger(log), corsMiddleware(cfg.DashboardOrigin))
+	r.Use(middleware.RequestID(), gin.Recovery(), requestLogger(log), corsMiddleware(cfg.DashboardOrigin))
 	authRateLimiter := middleware.NewRateLimiter(cfg.AuthRateLimit, cfg.RateLimitWindow)
 	webhookRateLimiter := middleware.NewRateLimiter(cfg.WebhookRateLimit, cfg.RateLimitWindow)
 
@@ -242,6 +242,7 @@ func requestLogger(log *slog.Logger) gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		log.Info("http",
+			"request_id", middleware.RequestIDValue(c),
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
 			"status", c.Writer.Status(),
