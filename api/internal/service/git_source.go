@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/sourcegit"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
@@ -185,15 +186,70 @@ func (s *GitDeploymentService) CreateTriggered(ctx context.Context, appName stri
 	return s.deployments.CreateGitTriggered(ctx, appName, source.Repository, branch, domain.DeploymentTriggerWebhook, deliveryID)
 }
 
-func (s *GitDeploymentService) Run(ctx context.Context, dep domain.Deployment, app domain.App, source domain.GitSource, branch string) error {
+func (s *GitDeploymentService) Retry(ctx context.Context, appName string, targetID uuid.UUID) (domain.Deployment, domain.App, domain.GitSource, error) {
+	app, err := s.apps.GetByName(ctx, appName)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, err
+	}
+	target, err := s.deployments.Get(ctx, targetID)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, err
+	}
+	if target.AppID != app.ID {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, domain.ErrDeploymentNotFound
+	}
+	if target.SourceType != "git" {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, domain.ErrDeploymentRetryUnavailable
+	}
+	if target.Status != domain.DeploymentStatusFailed && target.Status != domain.DeploymentStatusCancelled {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, domain.ErrDeploymentNotRetryable
+	}
+	source, err := s.sources.Get(ctx, app.ID)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, err
+	}
+	branch := target.Branch
 	if branch == "" {
 		branch = source.Branch
+	}
+	attempt := target.Attempt + 1
+	if attempt < 2 {
+		attempt = 2
+	}
+	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
+	retryStore, ok := s.deployments.deps.(store.GitRetryDeploymentStore)
+	if !ok {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, fmt.Errorf("service.Retry: git retry deployment store unavailable")
+	}
+	dep, err := retryStore.CreateGitRetry(ctx, app.ID, tag, source.Repository, branch, target.ID, attempt)
+	if err != nil {
+		return domain.Deployment{}, domain.App{}, domain.GitSource{}, fmt.Errorf("service.Retry: %w", err)
+	}
+	s.deployments.event(ctx, dep.ID, "queued", "system", fmt.Sprintf("Retry da tentativa %d solicitado", target.Attempt))
+	return dep, app, source, nil
+}
+
+func (s *GitDeploymentService) Run(ctx context.Context, dep domain.Deployment, app domain.App, source domain.GitSource, branch string) error {
+	runCtx, done := s.deployments.beginExecution(ctx, dep.ID)
+	defer done()
+	return s.run(runCtx, dep, app, source, branch)
+}
+
+func (s *GitDeploymentService) run(ctx context.Context, dep domain.Deployment, app domain.App, source domain.GitSource, branch string) error {
+	if branch == "" {
+		branch = source.Branch
+	}
+	if err := s.deployments.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
 	}
 	cloneCtx, cancel := context.WithTimeout(ctx, s.cloneTimeout)
 	s.deployments.event(ctx, dep.ID, "cloning", "system", fmt.Sprintf("Clonando %s (%s)", source.Repository, branch))
 	snapshot, err := s.preparer.Prepare(cloneCtx, source, branch)
 	cancel()
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.deployments.finishCancelled(ctx, dep, app.ID, "clone interrompido")
+		}
 		s.deployments.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.deployments.MarkFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunGitBuild: prepare source: %w", err)
@@ -201,8 +257,11 @@ func (s *GitDeploymentService) Run(ctx context.Context, dep domain.Deployment, a
 	defer snapshot.Source.Close()
 	s.deployments.event(ctx, dep.ID, "cloning", "system", fmt.Sprintf("Commit %s preparado", snapshot.CommitSHA))
 	if err := s.deployments.UpdateGitMetadata(ctx, dep.ID, snapshot.CommitSHA, snapshot.CommitAuthor, snapshot.CommitMessage, snapshot.Branch); err != nil {
+		if ctx.Err() != nil {
+			return s.deployments.finishCancelled(ctx, dep, app.ID, "metadados interrompidos")
+		}
 		s.deployments.MarkFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunGitBuild: metadata: %w", err)
 	}
-	return s.deployments.RunBuildWithDockerfile(context.WithoutCancel(ctx), dep, app, snapshot.Source, snapshot.DockerfilePath)
+	return s.deployments.runBuildWithDockerfile(ctx, dep, app, snapshot.Source, snapshot.DockerfilePath)
 }

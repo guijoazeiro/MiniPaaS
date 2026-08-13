@@ -50,6 +50,9 @@ type Deployment struct {
 	CommitMessage    pgtype.Text        `json:"commit_message"`
 	TriggerType      string             `json:"trigger_type"`
 	GithubDeliveryID pgtype.Text        `json:"github_delivery_id"`
+	Attempt          int32              `json:"attempt"`
+	RetryOf          pgtype.UUID        `json:"retry_of"`
+	CancelRequested  bool               `json:"cancel_requested"`
 }
 
 type DeploymentLog struct {

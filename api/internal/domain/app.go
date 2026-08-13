@@ -30,6 +30,8 @@ type DeploymentStatus string
 const (
 	DeploymentStatusPending    DeploymentStatus = "pending"
 	DeploymentStatusBuilding   DeploymentStatus = "building"
+	DeploymentStatusCancelRequested DeploymentStatus = "cancel_requested"
+	DeploymentStatusCancelled  DeploymentStatus = "cancelled"
 	DeploymentStatusRunning    DeploymentStatus = "running"
 	DeploymentStatusFailed     DeploymentStatus = "failed"
 	DeploymentStatusSuperseded DeploymentStatus = "superseded"
@@ -64,6 +66,9 @@ type Deployment struct {
 	CommitMessage    string           `json:"commit_message,omitempty"`
 	TriggerType      string           `json:"trigger_type"`
 	GitHubDeliveryID string           `json:"github_delivery_id,omitempty"`
+	Attempt          int              `json:"attempt"`
+	RetryOf         *uuid.UUID        `json:"retry_of,omitempty"`
+	CancelRequested bool             `json:"cancel_requested,omitempty"`
 	DurationMs       int              `json:"duration_ms,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
 	FinishedAt       *time.Time       `json:"finished_at,omitempty"`

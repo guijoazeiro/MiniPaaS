@@ -65,6 +65,15 @@ type TriggeredGitDeploymentStore interface {
 	CreateGitTriggered(ctx context.Context, appID uuid.UUID, imageTag, repository, branch, triggerType, deliveryID string) (domain.Deployment, error)
 }
 
+type GitRetryDeploymentStore interface {
+	CreateGitRetry(ctx context.Context, appID uuid.UUID, imageTag, repository, branch string, retryOf uuid.UUID, attempt int) (domain.Deployment, error)
+}
+
+type DeploymentCancellationStore interface {
+	RequestCancel(ctx context.Context, id uuid.UUID) (domain.Deployment, error)
+	MarkCancelled(ctx context.Context, id uuid.UUID) error
+}
+
 type GitSourceStore interface {
 	Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error)
 	Get(ctx context.Context, appID uuid.UUID) (domain.GitSource, error)

@@ -27,6 +27,15 @@ type DeploymentLogReader interface {
 	List(ctx context.Context, deploymentID uuid.UUID, afterID int64, limit int) ([]domain.DeploymentLog, error)
 }
 
+type DeploymentCanceller interface {
+	Cancel(ctx context.Context, deploymentID uuid.UUID) (domain.Deployment, error)
+}
+
+type DeploymentRetrier interface {
+	Retry(ctx context.Context, appName string, targetID uuid.UUID) (domain.Deployment, domain.App, domain.GitSource, error)
+	Run(ctx context.Context, dep domain.Deployment, app domain.App, source domain.GitSource, branch string) error
+}
+
 func (h *DeploymentHandler) ListAll(c *gin.Context) {
 	page := queryInt(c, "page", 1, 1, 100000)
 	perPage := queryInt(c, "per_page", 50, 1, 200)
@@ -58,14 +67,24 @@ type DeploymentHandler struct {
 	log           *slog.Logger
 	maxDeploySize int64
 	logs          DeploymentLogReader
+	canceller     DeploymentCanceller
+	retrier       DeploymentRetrier
 }
 
-func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger, maxDeploySize int64, logs ...DeploymentLogReader) *DeploymentHandler {
-	var reader DeploymentLogReader
-	if len(logs) > 0 {
-		reader = logs[0]
+func NewDeploymentHandler(svc DeploymentService, apps AppLookup, log *slog.Logger, maxDeploySize int64, options ...any) *DeploymentHandler {
+	h := &DeploymentHandler{svc: svc, apps: apps, log: log, maxDeploySize: maxDeploySize}
+	if canceller, ok := svc.(DeploymentCanceller); ok {
+		h.canceller = canceller
 	}
-	return &DeploymentHandler{svc: svc, apps: apps, log: log, maxDeploySize: maxDeploySize, logs: reader}
+	for _, option := range options {
+		switch value := option.(type) {
+		case DeploymentLogReader:
+			h.logs = value
+		case DeploymentRetrier:
+			h.retrier = value
+		}
+	}
+	return h
 }
 
 func (h *DeploymentHandler) Create(c *gin.Context) {
@@ -187,6 +206,62 @@ func (h *DeploymentHandler) Get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dep)
+}
+
+func (h *DeploymentHandler) Cancel(c *gin.Context) {
+	if h.canceller == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "deployment cancellation unavailable"})
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
+		return
+	}
+	app, err := h.apps.GetByName(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	dep, err := h.svc.Get(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	if dep.AppID != app.ID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+	updated, err := h.canceller.Cancel(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, updated)
+}
+
+func (h *DeploymentHandler) Retry(c *gin.Context) {
+	if h.retrier == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "deployment retry unavailable"})
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
+		return
+	}
+	dep, app, source, err := h.retrier.Retry(c.Request.Context(), c.Param("name"), id)
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	go func() {
+		buildCtx := context.WithoutCancel(c.Request.Context())
+		if err := h.retrier.Run(buildCtx, dep, app, source, dep.Branch); err != nil {
+			h.log.Error("retry git build failed", "app", app.Name, "deployment", dep.ID, "err", err)
+		}
+	}()
+	c.JSON(http.StatusAccepted, dep)
 }
 
 func (h *DeploymentHandler) Logs(c *gin.Context) {

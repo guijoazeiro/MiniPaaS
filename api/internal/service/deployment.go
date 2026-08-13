@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,6 +54,12 @@ type DeploymentService struct {
 	restartMaxRetries int
 	log               *slog.Logger
 	logs              DeploymentLogWriter
+	executionsMu      sync.Mutex
+	executions        map[uuid.UUID]*deploymentExecution
+}
+
+type deploymentExecution struct {
+	cancel context.CancelFunc
 }
 
 func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, logs ...DeploymentLogWriter) *DeploymentService {
@@ -67,7 +74,65 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
 		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter,
+		executions: make(map[uuid.UUID]*deploymentExecution),
 	}
+}
+
+func (s *DeploymentService) beginExecution(ctx context.Context, deploymentID uuid.UUID) (context.Context, func()) {
+	runCtx, cancel := context.WithCancel(ctx)
+	execution := &deploymentExecution{cancel: cancel}
+	s.executionsMu.Lock()
+	previous := s.executions[deploymentID]
+	s.executions[deploymentID] = execution
+	s.executionsMu.Unlock()
+	if previous != nil {
+		previous.cancel()
+	}
+	if current, err := s.deps.GetByID(context.WithoutCancel(ctx), deploymentID); err == nil && current.CancelRequested {
+		cancel()
+	}
+	done := func() {
+		cancel()
+		s.executionsMu.Lock()
+		if s.executions[deploymentID] == execution {
+			delete(s.executions, deploymentID)
+		}
+		s.executionsMu.Unlock()
+	}
+	return runCtx, done
+}
+
+func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) (domain.Deployment, error) {
+	current, err := s.deps.GetByID(ctx, deploymentID)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	if current.Status != domain.DeploymentStatusPending && current.Status != domain.DeploymentStatusBuilding && current.Status != domain.DeploymentStatusCancelRequested {
+		return domain.Deployment{}, domain.ErrDeploymentNotCancellable
+	}
+	canceller, ok := s.deps.(store.DeploymentCancellationStore)
+	if !ok {
+		return domain.Deployment{}, fmt.Errorf("service.Cancel: deployment cancellation store unavailable")
+	}
+	if _, err := canceller.RequestCancel(ctx, deploymentID); err != nil {
+		return domain.Deployment{}, err
+	}
+	s.event(ctx, deploymentID, "cleanup", "system", "Cancelamento solicitado")
+	s.executionsMu.Lock()
+	execution := s.executions[deploymentID]
+	s.executionsMu.Unlock()
+	if execution != nil {
+		execution.cancel()
+	} else {
+		if err := canceller.MarkCancelled(ctx, deploymentID); err != nil {
+			return domain.Deployment{}, err
+		}
+	}
+	updated, err := s.deps.GetByID(context.WithoutCancel(ctx), deploymentID)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	return updated, nil
 }
 
 func (s *DeploymentService) Create(ctx context.Context, appName string) (domain.Deployment, domain.App, error) {
@@ -144,11 +209,23 @@ func (s *DeploymentService) RunBuild(ctx context.Context, dep domain.Deployment,
 }
 
 func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader, dockerfile string) error {
+	runCtx, done := s.beginExecution(ctx, dep.ID)
+	defer done()
+	return s.runBuildWithDockerfile(runCtx, dep, app, src, dockerfile)
+}
+
+func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep domain.Deployment, app domain.App, src io.Reader, dockerfile string) error {
 	start := time.Now()
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
+	}
 	s.event(ctx, dep.ID, "queued", "system", "Deployment iniciado")
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
+	}
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
 	}
 	s.event(ctx, dep.ID, "building", "system", "Construindo imagem Docker")
 
@@ -162,24 +239,39 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		err = fmt.Errorf("custom Dockerfile builds are unavailable")
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
+		}
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
 	}
 	if err := s.persistBuildOutput(ctx, dep.ID, buildLog); err != nil {
 		_ = buildLog.Close()
+		if ctx.Err() != nil {
+			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
+		}
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: read build log: %w", err)
 	}
 	_ = buildLog.Close()
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
+	}
 	s.event(ctx, dep.ID, "building", "system", "Imagem Docker construída")
 
 	envVars, err := s.env.Decrypted(ctx, app.ID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.finishCancelled(ctx, dep, app.ID, "preparação interrompida")
+		}
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: decrypt env: %w", err)
+	}
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
 	}
 
 	if prev, err := s.deps.GetActive(ctx, app.ID); err == nil && prev.ContainerID != "" {
@@ -192,6 +284,9 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		}
 		_ = s.deps.UpdateStatus(ctx, prev.ID, domain.DeploymentStatusSuperseded)
 	}
+	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
+		return err
+	}
 
 	s.event(ctx, dep.ID, "starting", "system", "Iniciando container")
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
@@ -202,14 +297,25 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 		RestartMaxRetries: s.restartMaxRetries,
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.finishCancelled(ctx, dep, app.ID, "inicialização interrompida")
+		}
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: run container: %w", err)
+	}
+	if ctx.Err() != nil {
+		_ = s.docker.StopContainer(context.WithoutCancel(ctx), info.ID)
+		_ = s.docker.RemoveContainer(context.WithoutCancel(ctx), info.ID)
+		return s.finishCancelled(ctx, dep, app.ID, "inicialização interrompida")
 	}
 	s.event(ctx, dep.ID, "health_check", "system", "Container iniciado; aguardando verificação de saúde")
 
 	durationMs := int(time.Since(start).Milliseconds())
 	if err := s.deps.UpdateRunning(ctx, dep.ID, info.ID, info.Port, dep.ImageTag, durationMs); err != nil {
+		if ctx.Err() != nil {
+			return s.finishCancelled(ctx, dep, app.ID, "atualização interrompida")
+		}
 		s.event(ctx, dep.ID, "error", "stderr", err.Error())
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: mark running: %w", err)
@@ -239,11 +345,35 @@ func (s *DeploymentService) RunBuildWithDockerfile(ctx context.Context, dep doma
 	return nil
 }
 
+func (s *DeploymentService) checkCancelled(ctx context.Context, dep domain.Deployment, appID uuid.UUID) error {
+	if ctx.Err() != nil {
+		return s.finishCancelled(ctx, dep, appID, "cancelado")
+	}
+	current, err := s.deps.GetByID(context.WithoutCancel(ctx), dep.ID)
+	if err == nil && current.CancelRequested {
+		return s.finishCancelled(ctx, dep, appID, "cancelamento solicitado")
+	}
+	return nil
+}
+
+func (s *DeploymentService) finishCancelled(ctx context.Context, dep domain.Deployment, appID uuid.UUID, reason string) error {
+	writeCtx := context.WithoutCancel(ctx)
+	if canceller, ok := s.deps.(store.DeploymentCancellationStore); ok {
+		if err := canceller.MarkCancelled(writeCtx, dep.ID); err != nil {
+			s.log.Warn("mark deployment cancelled", "deployment", dep.ID, "err", err)
+		}
+	} else if err := s.deps.UpdateStatus(writeCtx, dep.ID, domain.DeploymentStatusCancelled); err != nil {
+		s.log.Warn("mark deployment cancelled", "deployment", dep.ID, "err", err)
+	}
+	s.event(writeCtx, dep.ID, "cleanup", "system", "Deployment cancelado: "+reason)
+	return domain.ErrDeploymentCancelled
+}
+
 func (s *DeploymentService) event(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) {
 	if s.logs == nil || strings.TrimSpace(message) == "" {
 		return
 	}
-	if _, err := s.logs.Append(ctx, deploymentID, stage, stream, message); err != nil {
+	if _, err := s.logs.Append(context.WithoutCancel(ctx), deploymentID, stage, stream, message); err != nil {
 		s.log.Warn("persist deployment log", "deployment", deploymentID, "stage", stage, "err", err)
 	}
 }
@@ -255,6 +385,9 @@ func (s *DeploymentService) persistBuildOutput(ctx context.Context, deploymentID
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
 			s.event(ctx, deploymentID, "building", "stdout", line)
