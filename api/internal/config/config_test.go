@@ -62,6 +62,9 @@ func TestLoadUsesDefaultMaxDeploySize(t *testing.T) {
 	if cfg.ContainerMemoryBytes != 0 || cfg.ContainerNanoCPUs != 0 || cfg.ContainerPidsLimit != 0 {
 		t.Fatalf("container limits = memory:%d cpu:%d pids:%d, want all unlimited by default", cfg.ContainerMemoryBytes, cfg.ContainerNanoCPUs, cfg.ContainerPidsLimit)
 	}
+	if cfg.ReadinessTimeout != 3*time.Second {
+		t.Fatalf("ReadinessTimeout = %s, want 3s", cfg.ReadinessTimeout)
+	}
 }
 
 func TestLoadParsesContainerResourceLimits(t *testing.T) {

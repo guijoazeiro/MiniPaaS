@@ -3,6 +3,8 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,5 +60,24 @@ func TestRateLimitMiddlewareReturnsRetryAfter(t *testing.T) {
 	}
 	if second.Header().Get("Retry-After") == "" {
 		t.Fatal("rate-limited response is missing Retry-After")
+	}
+}
+
+func TestRateLimiterIsSafeUnderConcurrentRequests(t *testing.T) {
+	limiter := NewRateLimiter(5, time.Minute)
+	var allowed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, _ := limiter.Allow("same-client"); ok {
+				allowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := allowed.Load(); got != 5 {
+		t.Fatalf("allowed concurrent requests = %d, want 5", got)
 	}
 }

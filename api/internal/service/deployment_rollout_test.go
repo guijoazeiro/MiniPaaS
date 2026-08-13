@@ -212,6 +212,34 @@ func TestRunBuildReadinessFailureKeepsPreviousContainer(t *testing.T) {
 	}
 }
 
+func TestAcquireRolloutSerializesSameApplication(t *testing.T) {
+	svc := NewDeploymentService(nil, nil, nil, nil, nil, nil, 1, "no", 0, slog.Default())
+	appID := uuid.New()
+	release, err := svc.acquireRollout(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan struct{})
+	go func() {
+		second, secondErr := svc.acquireRollout(context.Background(), appID)
+		if secondErr == nil {
+			second()
+			close(acquired)
+		}
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("second rollout acquired before first was released")
+	case <-time.After(25 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("second rollout did not acquire after first was released")
+	}
+}
+
 func indexOf(values []string, wanted string) int {
 	for i, value := range values {
 		if value == wanted {
