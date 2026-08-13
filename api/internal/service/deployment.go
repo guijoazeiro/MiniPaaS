@@ -338,6 +338,11 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		MemoryBytes:       s.runtimeLimits.MemoryBytes,
 		NanoCPUs:          s.runtimeLimits.NanoCPUs,
 		PidsLimit:         s.runtimeLimits.PidsLimit,
+		Labels: map[string]string{
+			"com.minipaas.managed":    "true",
+			"com.minipaas.app":        app.Name,
+			"com.minipaas.deployment": dep.ID.String(),
+		},
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -687,6 +692,11 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 		MemoryBytes:       s.runtimeLimits.MemoryBytes,
 		NanoCPUs:          s.runtimeLimits.NanoCPUs,
 		PidsLimit:         s.runtimeLimits.PidsLimit,
+		Labels: map[string]string{
+			"com.minipaas.managed":    "true",
+			"com.minipaas.app":        app.Name,
+			"com.minipaas.deployment": target.ID.String(),
+		},
 	})
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: run container: %w", err)

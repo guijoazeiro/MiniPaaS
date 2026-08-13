@@ -43,6 +43,7 @@ type Config struct {
 	ContainerMemoryBytes    int64
 	ContainerNanoCPUs       int64
 	ContainerPidsLimit      int64
+	ReadinessTimeout        time.Duration
 	LogLevel                string
 }
 
@@ -134,6 +135,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	readinessTimeout, err := time.ParseDuration(env("READINESS_TIMEOUT", "3s"))
+	if err != nil || readinessTimeout <= 0 {
+		return nil, fmt.Errorf("config: READINESS_TIMEOUT must be a positive duration")
+	}
 	githubAppID, githubAppSlug, githubAppKeyPath, err := githubAppConfig()
 	if err != nil {
 		return nil, err
@@ -171,6 +176,7 @@ func Load() (*Config, error) {
 		ContainerMemoryBytes:    containerMemoryBytes,
 		ContainerNanoCPUs:       containerNanoCPUs,
 		ContainerPidsLimit:      containerPidsLimit,
+		ReadinessTimeout:        readinessTimeout,
 		LogLevel:                env("LOG_LEVEL", "info"),
 	}, nil
 

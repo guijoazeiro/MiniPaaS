@@ -9,6 +9,18 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+func copyLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return map[string]string{"com.minipaas.managed": "true"}
+	}
+	out := make(map[string]string, len(labels)+1)
+	for key, value := range labels {
+		out[key] = value
+	}
+	out["com.minipaas.managed"] = "true"
+	return out
+}
+
 func ImageBuildOptions(tag, dockerfile string) build.ImageBuildOptions {
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"

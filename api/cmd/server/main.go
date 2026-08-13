@@ -109,6 +109,13 @@ func main() {
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
 	}
+	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
+	if removed, err := service.ReconcileManagedContainers(reconcileCtx, dockerCli, depStore); err != nil {
+		log.Warn("reconcile managed containers", "err", err)
+	} else if removed > 0 {
+		log.Info("reconciled managed containers", "removed", removed)
+	}
+	cancelReconcile()
 	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
 	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
 	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)
@@ -140,6 +147,11 @@ func main() {
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log, cfg.DashboardOrigin)
 	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log, cfg.DashboardOrigin)
+	readyH := handler.NewReadinessHandler(cfg.ReadinessTimeout, map[string]handler.ReadinessProbe{
+		"database": pool.Ping,
+		"docker":   dockerCli.Ping,
+		"caddy":    caddyCli.Ping,
+	}, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -156,6 +168,7 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	r.GET("/ready", readyH.Serve)
 	r.POST("/auth/login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.Login)
 	r.POST("/auth/web-login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.WebLogin)
 	r.POST("/auth/logout", authH.Logout)
