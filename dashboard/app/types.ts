@@ -21,6 +21,35 @@ export type CustomDomain = {
   updated_at: string;
 };
 
+export type AppMetrics = {
+  app_name: string;
+  collected_at: string;
+  runtime?: {
+    container_id?: string;
+    state: string;
+    restart_count: number;
+    uptime_seconds: number;
+    started_at?: string;
+    cpu_percent: number;
+    memory_usage_bytes: number;
+    memory_limit_bytes: number;
+    memory_percent: number;
+  };
+  deployments: {
+    total: number;
+    successful: number;
+    failed: number;
+    in_progress: number;
+    success_rate: number;
+    average_duration_ms: number;
+  };
+  health_check_failures: Array<{
+    deployment_id: string;
+    message: string;
+    created_at: string;
+  }>;
+};
+
 export type Deployment = {
   id: string;
   app_id: string;

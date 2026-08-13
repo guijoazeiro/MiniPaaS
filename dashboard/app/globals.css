@@ -179,6 +179,27 @@ select { width: 100%; min-height: 42px; padding: 0 36px 0 12px; border: 1px soli
 .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
 .summary-grid > div { padding: 17px; border: 1px solid var(--line); border-radius: 10px; }
 .summary-grid strong { display: block; overflow: hidden; margin: 9px 0 7px; color: var(--ink); font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-panel { padding: 22px; }
+.metrics-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.metrics-panel-heading > small { color: var(--muted); font-size: 11px; }
+.runtime-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.runtime-metric-grid article { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface) 76%, transparent); }
+.runtime-metric-grid span, .runtime-metric-grid small { display: block; color: var(--muted); font-size: 11px; }
+.runtime-metric-grid strong { display: block; overflow: hidden; margin: 10px 0 7px; color: var(--ink); font-size: 24px; letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-metric-grid small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.metrics-deployment-summary, .metrics-health-summary { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.metrics-subheading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.metrics-subheading h3 { margin: 4px 0 0; font-size: 14px; }
+.metrics-subheading > strong { color: var(--violet-ink); font: 18px var(--font-geist-mono), monospace; }
+.metrics-progress { height: 6px; margin: 18px 0 10px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--line) 80%, transparent); }
+.metrics-progress span { display: block; height: 100%; border-radius: inherit; background: var(--violet); transition: width .2s ease; }
+.metrics-breakdown { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 11px; }
+.metrics-caption { display: block; margin-top: 14px; color: var(--muted); font-size: 11px; }
+.metrics-failure-list { display: grid; gap: 9px; margin-top: 15px; }
+.metrics-failure-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.metrics-failure-list span { overflow: hidden; color: var(--ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-failure-list small { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
 .logs-page-heading { align-items: flex-end; }
 .project-selector { width: min(330px, 100%); }
 .logs-panel.dedicated { padding: 22px; }
@@ -195,6 +216,7 @@ select { width: 100%; min-height: 42px; padding: 0 36px 0 12px; border: 1px soli
 @media (max-width: 1180px) {
   .app-shell { grid-template-columns: 218px minmax(0, 1fr); }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .runtime-metric-grid { grid-template-columns: repeat(2, 1fr); }
   .project-table-head, .project-row { grid-template-columns: minmax(190px, 1.3fr) 120px minmax(160px, 1fr) 130px 48px; }
   .project-table-head > span:nth-child(5), .project-row > span:nth-child(5) { display: none; }
   .deployment-table-head, .deployment-table-row { grid-template-columns: 120px minmax(180px, 1fr) 120px minmax(180px, 1fr) 135px; }
@@ -237,6 +259,11 @@ select { width: 100%; min-height: 42px; padding: 0 36px 0 12px; border: 1px soli
   .project-tabs { overflow-x: auto; }
   .project-tabs button { flex: 0 0 auto; }
   .summary-grid { grid-template-columns: 1fr; }
+  .runtime-metric-grid { grid-template-columns: 1fr 1fr; }
+  .metrics-detail-grid { grid-template-columns: 1fr; }
+  .metrics-panel { padding: 17px; }
+  .metrics-panel-heading { align-items: flex-start; flex-direction: column; }
+  .metrics-breakdown { display: grid; gap: 5px; }
   .logs-page-heading .project-selector { width: 100%; }
   .log-heading-actions { align-items: flex-end; flex-direction: column-reverse; gap: 6px; }
   .logs-panel.dedicated .log-output { height: 58vh; min-height: 360px; }
