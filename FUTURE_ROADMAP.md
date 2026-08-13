@@ -106,6 +106,8 @@ Phase 12.1 implements custom-domain persistence, DNS verification, Caddy route l
 
 ### Operational metrics
 
+Phase 12.2 implements an on-demand metrics snapshot from Docker and deployment history, with a project-level dashboard panel. Prometheus-compatible export and long-term time-series storage remain future work.
+
 - CPU and memory usage.
 - Container restart count.
 - Uptime and current container state.
@@ -113,7 +115,7 @@ Phase 12.1 implements custom-domain persistence, DNS verification, Caddy route l
 - Recent health-check failures.
 - Small per-application charts in the dashboard.
 
-The initial metrics scope should remain lightweight; Prometheus-compatible export can be added later.
+The initial metrics scope remains lightweight; Prometheus-compatible export can be added later.
 
 ## Cross-cutting security and reliability
 

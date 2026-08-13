@@ -24,6 +24,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 10.3 | Retry and cancellation | ✅ done |
 | 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
 | 12.1 | Custom domains | 🚧 implemented, awaiting DNS/HTTPS validation |
+| 12.2 | Operational metrics | 🚧 implemented, awaiting manual validation |
 
 ## Stack
 
@@ -555,6 +556,16 @@ Apply migration 013 before starting the API:
 cd api
 go run ./cmd/migrate up
 ```
+
+### Operational metrics (Phase 12.2)
+
+Project details expose a lightweight, on-demand metrics snapshot at:
+
+```text
+GET /apps/:name/metrics
+```
+
+The response includes current container CPU and memory usage, uptime, restart count, deployment success/failure summary, average deployment duration, and recent health-check failures. The dashboard renders these values under **Visão geral → Métricas operacionais**. Metrics are collected directly from Docker when requested; no Prometheus service or additional database migration is required.
 
 ## Project layout
 
