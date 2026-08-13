@@ -95,6 +95,8 @@ The implementation persists candidate container metadata, serializes the promoti
 
 ### Custom domains
 
+Phase 12.1 implements custom-domain persistence, DNS verification, Caddy route lifecycle, and dashboard management. The remaining validation is against a real DNS record and public HTTPS endpoint.
+
 - Attach one or more custom domains to an application.
 - Keep the default MiniPaaS subdomain available.
 - Display pending, verified, and active DNS states.

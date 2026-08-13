@@ -23,6 +23,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 10.2 | Persistent build logs | ✅ done |
 | 10.3 | Retry and cancellation | ✅ done |
 | 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
+| 12.1 | Custom domains | 🚧 implemented, awaiting DNS/HTTPS validation |
 
 ## Stack
 
@@ -535,6 +536,26 @@ go run ./cmd/migrate up
 
 Readiness currently checks the published TCP port, so the application must bind its configured internal port (8080 by default) and listen on all interfaces inside the container. HTTP path checks and per-application startup policies remain future configuration work.
 
+### Custom domains (Phase 12.1)
+
+Applications can have one or more custom hostnames in addition to the default `<app>.<BASE_DOMAIN>` URL. The dashboard exposes this under **Configurações → Domínios customizados** and the API provides:
+
+```text
+GET    /apps/:name/domains
+POST   /apps/:name/domains                 { "hostname": "api.example.com" }
+POST   /apps/:name/domains/:id/verify
+DELETE /apps/:name/domains/:id
+```
+
+Create the DNS record before verifying the domain. MiniPaaS resolves the hostname, optionally compares the result with `PUBLIC_IP`, and then creates the Caddy route. Caddy handles HTTPS automatically when the hostname points to the server and ports 80/443 are reachable. Set `PUBLIC_IP` in production for strict ownership validation; when it is empty, local development accepts any hostname that resolves.
+
+Apply migration 013 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
 ## Project layout
 
 ```
@@ -581,6 +602,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | Postgres DSN |
 | `BASE_DOMAIN` | yes | — | e.g. `minipaas.yourdomain.com` — apps become `<name>.<BASE_DOMAIN>` |
+| `PUBLIC_IP` | no | — | Public IPv4/IPv6 used to validate custom-domain DNS. Leave empty only for local development. |
 | `ENCRYPTION_KEY` | yes | — | 32-byte hex (64 chars). Generate with `openssl rand -hex 32` |
 | `JWT_SECRET` | yes | — | Signing secret for auth tokens |
 | `PORT` | no | `:8080` | HTTP listen address |
