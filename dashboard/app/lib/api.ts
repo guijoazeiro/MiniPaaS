@@ -38,6 +38,8 @@ const statusLabels: Record<string, string> = {
   idle: "Sem deploy",
   pending: "Na fila",
   building: "Construindo",
+  cancel_requested: "Cancelamento solicitado",
+  cancelled: "Cancelado",
   superseded: "Substituído",
   rolled_back: "Revertido",
   stopped: "Parada",

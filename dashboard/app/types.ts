@@ -15,7 +15,7 @@ export type Deployment = {
   app_id: string;
   app_name?: string;
   image_tag: string;
-  status: "pending" | "building" | "running" | "failed" | "superseded" | "rolled_back" | "stopped";
+  status: "pending" | "building" | "cancel_requested" | "cancelled" | "running" | "failed" | "superseded" | "rolled_back" | "stopped";
   port?: number;
   duration_ms?: number;
   created_at: string;
@@ -27,6 +27,9 @@ export type Deployment = {
   commit_message?: string;
   trigger_type?: "manual" | "webhook";
   github_delivery_id?: string;
+  attempt?: number;
+  retry_of?: string;
+  cancel_requested?: boolean;
 };
 
 export type DeploymentPage = {
