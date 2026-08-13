@@ -316,6 +316,8 @@ PUT    /apps/:name/env/:key           { value } → 204                (AES-256-
 DELETE /apps/:name/env/:key           → 204
 
 POST   /apps/:name/rollback           { deployment_id } → Deployment (restored)
+POST   /apps/:name/deployments/:id/retry  → Deployment (Git deployment only)
+POST   /apps/:name/deployments/:id/cancel → Deployment (pending/building only)
 
 WS     /apps/:name/logs?follow=true&tail=100     (active deployment, or latest failed deployment with logs)
        frames: { "ts": "...", "stream": "stdout|stderr", "line": "..." }
@@ -328,6 +330,8 @@ Deployment status transitions:
 
 ```
 pending → building → running    (happy path)
+pending → cancel_requested → cancelled
+building → cancel_requested → cancelled
                    ↘ failed     (build or start failed)
 running           → superseded  (replaced by a newer deploy)
                   → rolled_back (intentional rollback — phase 5)
@@ -355,6 +359,8 @@ minip login                            # host + username + password → OS user 
 minip apps create <name>
 minip apps list
 minip apps info <name>                 # status + container state + public URL + recent deployments
+minip apps retry <name> <deployment-id> # retry a failed/cancelled Git deployment
+minip apps cancel <name> <deployment-id> # cancel a pending/building deployment
 minip apps connect-github <name> --repo owner/repository
 minip apps connect-github <name> --repo owner/repository --branch main --context services/api --dockerfile Dockerfile
 minip apps github-installations
@@ -482,6 +488,19 @@ In the dashboard, open **Deployments → Logs de build** for a release. The CLI 
 ```
 
 Apply migration 010 before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
+### Retry and cancellation (Phase 10.3)
+
+Deployments can be cancelled while they are pending or building. Cancellation is persisted, interrupts the active clone/build context when the API process is running, and is finalized as `cancelled` without marking the application as failed. A deployment that is already running should be stopped through the existing application stop action.
+
+Retries create a new deployment linked to the previous one through `retry_of` and increment `attempt`. They are currently available for Git deployments because the configured repository can be cloned again; manual tar uploads are not retained as rebuild artifacts.
+
+Apply migration 011 before starting the API:
 
 ```powershell
 cd api

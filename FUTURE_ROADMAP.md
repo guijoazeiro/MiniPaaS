@@ -52,7 +52,7 @@ Turn GitHub pushes into traceable, automatic deployments.
 - Allow a failed deployment to be retried manually.
 - Support deployment cancellation when the build/runtime layer allows it safely.
 
-Phase 10.1 delivers signed GitHub App push webhooks, per-application auto-deploy, branch/repository filtering, delivery deduplication, and deployment trigger metadata. Retry and cancellation remain for a later Phase 10 increment.
+Phase 10.1 delivers signed GitHub App push webhooks, per-application auto-deploy, branch/repository filtering, delivery deduplication, and deployment trigger metadata. Phase 10.3 adds persisted cancellation, interruption of active clone/build work, and manual retries for Git deployments linked through `retry_of` and `attempt`.
 
 ### Build visibility
 
@@ -60,6 +60,8 @@ Phase 10.1 delivers signed GitHub App push webhooks, per-application auto-deploy
 - Persist build logs so failures remain available after the process finishes.
 - Display explicit stages such as cloning, building, starting, checking health, publishing, and cleaning up.
 - Stream build progress to the CLI and dashboard.
+
+Phase 10.2 delivers ordered persistent build events and historical deployment log views in the dashboard and CLI.
 
 ## Phase 11 — Zero-downtime deployments
 
