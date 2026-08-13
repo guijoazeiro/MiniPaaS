@@ -19,6 +19,11 @@ type RuntimeMetrics struct {
 	MemoryUsageBytes uint64     `json:"memory_usage_bytes"`
 	MemoryLimitBytes uint64     `json:"memory_limit_bytes"`
 	MemoryPercent    float64    `json:"memory_percent"`
+	NetworkRxBytes   uint64     `json:"network_rx_bytes"`
+	NetworkTxBytes   uint64     `json:"network_tx_bytes"`
+	BlockReadBytes   uint64     `json:"block_read_bytes"`
+	BlockWriteBytes  uint64     `json:"block_write_bytes"`
+	Pids             uint64     `json:"pids"`
 }
 
 type DeploymentMetrics struct {
@@ -42,4 +47,10 @@ type AppMetrics struct {
 	Runtime             *RuntimeMetrics      `json:"runtime,omitempty"`
 	Deployments         DeploymentMetrics    `json:"deployments"`
 	HealthCheckFailures []HealthCheckFailure `json:"health_check_failures"`
+}
+
+type MetricsFrame struct {
+	Type    string         `json:"type"`
+	TS      time.Time      `json:"ts"`
+	Runtime RuntimeMetrics `json:"runtime"`
 }

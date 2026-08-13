@@ -21,3 +21,21 @@ func TestCPUPercentWithoutBaselineIsZero(t *testing.T) {
 		t.Fatalf("cpuPercent = %v, want 0", got)
 	}
 }
+
+func TestMetricsFromStatsIncludesIO(t *testing.T) {
+	stats := container.StatsResponse{
+		Networks: map[string]container.NetworkStats{
+			"eth0": {RxBytes: 120, TxBytes: 45},
+			"eth1": {RxBytes: 8, TxBytes: 5},
+		},
+		BlkioStats: container.BlkioStats{IoServiceBytesRecursive: []container.BlkioStatEntry{
+			{Op: "read", Value: 900},
+			{Op: "write", Value: 300},
+		}},
+		PidsStats: container.PidsStats{Current: 4},
+	}
+	metrics := MetricsFromStats(stats, ContainerRuntime{State: "running", Running: true})
+	if metrics.NetworkRxBytes != 128 || metrics.NetworkTxBytes != 50 || metrics.BlockReadBytes != 900 || metrics.BlockWriteBytes != 300 || metrics.Pids != 4 {
+		t.Fatalf("metrics = %#v", metrics)
+	}
+}

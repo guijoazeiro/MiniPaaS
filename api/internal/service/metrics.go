@@ -88,6 +88,11 @@ func (s *MetricsService) Get(ctx context.Context, appName string) (domain.AppMet
 	runtime.MemoryUsageBytes = snapshot.MemoryUsageBytes
 	runtime.MemoryLimitBytes = snapshot.MemoryLimitBytes
 	runtime.MemoryPercent = snapshot.MemoryPercent
+	runtime.NetworkRxBytes = snapshot.NetworkRxBytes
+	runtime.NetworkTxBytes = snapshot.NetworkTxBytes
+	runtime.BlockReadBytes = snapshot.BlockReadBytes
+	runtime.BlockWriteBytes = snapshot.BlockWriteBytes
+	runtime.Pids = snapshot.Pids
 	if snapshot.Running && snapshot.StartedAt != nil {
 		uptime := int64(time.Since(*snapshot.StartedAt).Seconds())
 		if uptime > 0 {

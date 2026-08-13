@@ -134,6 +134,7 @@ func main() {
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log)
+	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
@@ -192,6 +193,7 @@ func main() {
 	auth.DELETE("/apps/:name/env/:key", envH.Delete)
 
 	auth.GET("/apps/:name/logs", wsH.Serve)
+	auth.GET("/apps/:name/metrics/stream", metricsWS.Serve)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,
