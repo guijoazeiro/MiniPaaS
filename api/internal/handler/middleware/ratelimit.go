@@ -66,13 +66,25 @@ func (l *RateLimiter) Allow(key string) (allowed bool, retryAfter time.Duration)
 	}
 
 	l.clients[key] = rateLimitState{started: now, count: 1}
-	// Bound stale state growth when a process receives many distinct clients.
-	if len(l.clients) > 1024 {
+	// Bound state growth when a process receives many distinct clients. Prefer
+	// removing expired windows, then evict the oldest active entries.
+	for len(l.clients) > 1024 {
+		oldestKey := ""
+		oldest := now
 		for client, state := range l.clients {
 			if now.Sub(state.started) >= l.window {
 				delete(l.clients, client)
+				continue
+			}
+			if oldestKey == "" || state.started.Before(oldest) {
+				oldestKey = client
+				oldest = state.started
 			}
 		}
+		if oldestKey == "" {
+			break
+		}
+		delete(l.clients, oldestKey)
 	}
 	return true, 0
 }
