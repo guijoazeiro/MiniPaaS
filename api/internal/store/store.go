@@ -74,6 +74,13 @@ type DeploymentCancellationStore interface {
 	MarkCancelled(ctx context.Context, id uuid.UUID) error
 }
 
+type DeploymentCandidateStore interface {
+	UpdateCandidate(ctx context.Context, id uuid.UUID, containerID string, port int) error
+	PromoteCandidate(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error
+	ClearCandidate(ctx context.Context, id uuid.UUID) error
+	ListCandidates(ctx context.Context) ([]domain.Deployment, error)
+}
+
 type GitSourceStore interface {
 	Upsert(ctx context.Context, source domain.GitSource) (domain.GitSource, error)
 	Get(ctx context.Context, appID uuid.UUID) (domain.GitSource, error)

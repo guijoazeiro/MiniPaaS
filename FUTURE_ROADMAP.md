@@ -65,6 +65,8 @@ Phase 10.2 delivers ordered persistent build events and historical deployment lo
 
 ## Phase 11 — Zero-downtime deployments
 
+The baseline rollout is implemented in the API. End-to-end validation with a running Docker/Caddy stack remains before marking this phase complete.
+
 Make releases safe enough for continuously available applications.
 
 ### Deployment strategy
@@ -77,6 +79,8 @@ Make releases safe enough for continuously available applications.
 6. Stop and remove the previous container after a grace period.
 
 If the candidate fails, MiniPaaS keeps the previous deployment serving traffic and records the new deployment as failed.
+
+The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. HTTP health paths, startup grace periods, and resource limits remain follow-up configuration work.
 
 ### Application configuration
 

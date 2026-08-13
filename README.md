@@ -19,6 +19,10 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 8 | Polish, CI, release | ✅ done |
 | 9.1 | Deploy from public GitHub repositories | ✅ done |
 | 9.1.1 | Dashboard navigation and operational UX | 🚧 implemented, awaiting manual validation |
+| 10.1 | Signed GitHub webhooks and auto-deploy | ✅ done |
+| 10.2 | Persistent build logs | ✅ done |
+| 10.3 | Retry and cancellation | ✅ done |
+| 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
 
 ## Stack
 
@@ -222,6 +226,7 @@ For a faster local check, add these values to `.env` and restart the API:
 
 ```env
 HEALTH_CHECK_INTERVAL=3s
+DEPLOY_READY_TIMEOUT=60s
 RESTART_POLICY=on-failure
 RESTART_MAX_RETRIES=3
 ```
@@ -507,6 +512,29 @@ cd api
 go run ./cmd/migrate up
 ```
 
+### Zero-downtime deployments (Phase 11)
+
+Deployments now use a candidate rollout when Docker and the persistent deployment store support the Phase 11 capabilities:
+
+1. Build the new image while the current container keeps serving traffic.
+2. Start the new container with a unique candidate name and port.
+3. Wait up to `DEPLOY_READY_TIMEOUT` for the candidate to be running and accepting TCP connections.
+4. Replace the Caddy route atomically, then promote the candidate in PostgreSQL.
+5. Stop and remove the previous container only after the route and deployment record point to the candidate.
+
+If the candidate exits, fails readiness, the route cannot be switched, or the promotion is interrupted, the candidate is removed and the previous release remains active. Deployments are serialized per application during the rollout portion so concurrent builds cannot orphan an already-promoted container.
+
+Candidate container and port metadata is persisted by migration 012. On API startup, any candidate left by an interrupted process is removed and the route is restored to the last committed running deployment.
+
+Apply the migration before starting the API:
+
+```powershell
+cd api
+go run ./cmd/migrate up
+```
+
+Readiness currently checks the published TCP port, so the application must bind its configured internal port (8080 by default) and listen on all interfaces inside the container. HTTP path checks and per-application startup policies remain future configuration work.
+
 ## Project layout
 
 ```
@@ -563,6 +591,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `ADMIN_PASSWORD` | no | — | First-run admin seed. Ignored once a user exists |
 | `IMAGE_RETENTION` | no | `5` | How many recent deployment images to keep per app. Older ones are pruned (best-effort) after each successful deploy — Docker refuses to delete in-use images, so the active one is always safe. |
 | `HEALTH_CHECK_INTERVAL` | no | `30s` | How often running containers are inspected; `exited`, `dead`, and missing containers are marked failed. |
+| `DEPLOY_READY_TIMEOUT` | no | `60s` | Maximum time a new candidate container may take to accept TCP connections before the rollout is failed and the current release remains active. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
 | `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
 | `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. The Docker build keeps its existing lifecycle. |

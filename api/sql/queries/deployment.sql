@@ -67,6 +67,36 @@ SET status       = 'running',
     finished_at  = now()
 WHERE id = @id;
 
+-- name: UpdateDeploymentCandidate :exec
+UPDATE deployments
+SET candidate_container_id = @candidate_container_id,
+    candidate_port = @candidate_port
+WHERE id = @id;
+
+-- name: PromoteDeploymentCandidate :exec
+UPDATE deployments
+SET status = 'running',
+    container_id = @container_id,
+    port = @port,
+    image_tag = @image_tag,
+    duration_ms = @duration_ms,
+    candidate_container_id = NULL,
+    candidate_port = NULL,
+    finished_at = now()
+WHERE id = @id;
+
+-- name: ClearDeploymentCandidate :exec
+UPDATE deployments
+SET candidate_container_id = NULL,
+    candidate_port = NULL
+WHERE id = @id;
+
+-- name: ListDeploymentCandidates :many
+SELECT * FROM deployments
+WHERE candidate_container_id IS NOT NULL
+  AND status <> 'running'
+ORDER BY created_at ASC;
+
 -- name: UpdateDeploymentStatus :exec
 UPDATE deployments
 SET status = @status, finished_at = now()

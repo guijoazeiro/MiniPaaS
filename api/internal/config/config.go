@@ -24,6 +24,7 @@ type Config struct {
 	AdminPassword           string
 	ImageRetention          int
 	HealthCheckInterval     time.Duration
+	DeployReadyTimeout      time.Duration
 	RestartPolicy           string
 	RestartMaxRetries       int
 	MaxDeploySize           int64
@@ -78,6 +79,10 @@ func Load() (*Config, error) {
 	if err != nil || healthCheckInterval <= 0 {
 		return nil, fmt.Errorf("config: HEALTH_CHECK_INTERVAL must be a positive duration")
 	}
+	deployReadyTimeout, err := time.ParseDuration(env("DEPLOY_READY_TIMEOUT", "60s"))
+	if err != nil || deployReadyTimeout <= 0 {
+		return nil, fmt.Errorf("config: DEPLOY_READY_TIMEOUT must be a positive duration")
+	}
 	restartPolicy := env("RESTART_POLICY", "on-failure")
 	if restartPolicy != "no" && restartPolicy != "always" && restartPolicy != "on-failure" && restartPolicy != "unless-stopped" {
 		return nil, fmt.Errorf("config: RESTART_POLICY is invalid")
@@ -116,6 +121,7 @@ func Load() (*Config, error) {
 		AdminPassword:           os.Getenv("ADMIN_PASSWORD"),
 		ImageRetention:          retention,
 		HealthCheckInterval:     healthCheckInterval,
+		DeployReadyTimeout:      deployReadyTimeout,
 		RestartPolicy:           restartPolicy,
 		RestartMaxRetries:       restartMaxRetries,
 		MaxDeploySize:           maxDeploySizeMB * 1024 * 1024,

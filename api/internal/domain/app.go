@@ -28,15 +28,15 @@ type App struct {
 type DeploymentStatus string
 
 const (
-	DeploymentStatusPending    DeploymentStatus = "pending"
-	DeploymentStatusBuilding   DeploymentStatus = "building"
+	DeploymentStatusPending         DeploymentStatus = "pending"
+	DeploymentStatusBuilding        DeploymentStatus = "building"
 	DeploymentStatusCancelRequested DeploymentStatus = "cancel_requested"
-	DeploymentStatusCancelled  DeploymentStatus = "cancelled"
-	DeploymentStatusRunning    DeploymentStatus = "running"
-	DeploymentStatusFailed     DeploymentStatus = "failed"
-	DeploymentStatusSuperseded DeploymentStatus = "superseded"
-	DeploymentStatusRolledBack DeploymentStatus = "rolled_back"
-	DeploymentStatusStopped    DeploymentStatus = "stopped"
+	DeploymentStatusCancelled       DeploymentStatus = "cancelled"
+	DeploymentStatusRunning         DeploymentStatus = "running"
+	DeploymentStatusFailed          DeploymentStatus = "failed"
+	DeploymentStatusSuperseded      DeploymentStatus = "superseded"
+	DeploymentStatusRolledBack      DeploymentStatus = "rolled_back"
+	DeploymentStatusStopped         DeploymentStatus = "stopped"
 )
 
 type User struct {
@@ -52,26 +52,28 @@ type EnvVarKey struct {
 }
 
 type Deployment struct {
-	ID               uuid.UUID        `json:"id"`
-	AppID            uuid.UUID        `json:"app_id"`
-	ImageTag         string           `json:"image_tag"`
-	Status           DeploymentStatus `json:"status"`
-	ContainerID      string           `json:"container_id,omitempty"`
-	Port             int              `json:"port,omitempty"`
-	CommitSHA        string           `json:"commit_sha,omitempty"`
-	SourceType       string           `json:"source_type"`
-	Repository       string           `json:"repository,omitempty"`
-	Branch           string           `json:"branch,omitempty"`
-	CommitAuthor     string           `json:"commit_author,omitempty"`
-	CommitMessage    string           `json:"commit_message,omitempty"`
-	TriggerType      string           `json:"trigger_type"`
-	GitHubDeliveryID string           `json:"github_delivery_id,omitempty"`
-	Attempt          int              `json:"attempt"`
-	RetryOf         *uuid.UUID        `json:"retry_of,omitempty"`
-	CancelRequested bool             `json:"cancel_requested,omitempty"`
-	DurationMs       int              `json:"duration_ms,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
-	FinishedAt       *time.Time       `json:"finished_at,omitempty"`
+	ID                   uuid.UUID        `json:"id"`
+	AppID                uuid.UUID        `json:"app_id"`
+	ImageTag             string           `json:"image_tag"`
+	Status               DeploymentStatus `json:"status"`
+	ContainerID          string           `json:"container_id,omitempty"`
+	Port                 int              `json:"port,omitempty"`
+	CandidateContainerID string           `json:"candidate_container_id,omitempty"`
+	CandidatePort        int              `json:"candidate_port,omitempty"`
+	CommitSHA            string           `json:"commit_sha,omitempty"`
+	SourceType           string           `json:"source_type"`
+	Repository           string           `json:"repository,omitempty"`
+	Branch               string           `json:"branch,omitempty"`
+	CommitAuthor         string           `json:"commit_author,omitempty"`
+	CommitMessage        string           `json:"commit_message,omitempty"`
+	TriggerType          string           `json:"trigger_type"`
+	GitHubDeliveryID     string           `json:"github_delivery_id,omitempty"`
+	Attempt              int              `json:"attempt"`
+	RetryOf              *uuid.UUID       `json:"retry_of,omitempty"`
+	CancelRequested      bool             `json:"cancel_requested,omitempty"`
+	DurationMs           int              `json:"duration_ms,omitempty"`
+	CreatedAt            time.Time        `json:"created_at"`
+	FinishedAt           *time.Time       `json:"finished_at,omitempty"`
 }
 
 type DeploymentListItem struct {

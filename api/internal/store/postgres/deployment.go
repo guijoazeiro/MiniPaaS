@@ -141,7 +141,7 @@ func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, l
 	for i, row := range rows {
 		deployment := toDomainDeployment(sqlc.Deployment{
 			ID: row.ID, AppID: row.AppID, ImageTag: row.ImageTag, Status: row.Status,
-			ContainerID: row.ContainerID, Port: row.Port, CommitSha: row.CommitSha,
+			ContainerID: row.ContainerID, Port: row.Port, CandidateContainerID: row.CandidateContainerID, CandidatePort: row.CandidatePort, CommitSha: row.CommitSha,
 			DurationMs: row.DurationMs, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
 			SourceType: row.SourceType, Repository: row.Repository, Branch: row.Branch,
 			CommitAuthor: row.CommitAuthor, CommitMessage: row.CommitMessage,
@@ -193,6 +193,43 @@ func (s *DeploymentStore) UpdateRunning(ctx context.Context, id uuid.UUID, conta
 	return nil
 }
 
+func (s *DeploymentStore) UpdateCandidate(ctx context.Context, id uuid.UUID, containerID string, port int) error {
+	if err := s.q.UpdateDeploymentCandidate(ctx, sqlc.UpdateDeploymentCandidateParams{
+		ID: uuidToPG(id), CandidateContainerID: pgtype.Text{String: containerID, Valid: true}, CandidatePort: pgtype.Int4{Int32: int32(port), Valid: true},
+	}); err != nil {
+		return fmt.Errorf("store.UpdateDeploymentCandidate: %w", err)
+	}
+	return nil
+}
+
+func (s *DeploymentStore) PromoteCandidate(ctx context.Context, id uuid.UUID, containerID string, port int, imageTag string, durationMs int) error {
+	if err := s.q.PromoteDeploymentCandidate(ctx, sqlc.PromoteDeploymentCandidateParams{
+		ID: uuidToPG(id), ContainerID: pgtype.Text{String: containerID, Valid: true}, Port: pgtype.Int4{Int32: int32(port), Valid: true}, ImageTag: imageTag, DurationMs: pgtype.Int4{Int32: int32(durationMs), Valid: true},
+	}); err != nil {
+		return fmt.Errorf("store.PromoteDeploymentCandidate: %w", err)
+	}
+	return nil
+}
+
+func (s *DeploymentStore) ClearCandidate(ctx context.Context, id uuid.UUID) error {
+	if err := s.q.ClearDeploymentCandidate(ctx, uuidToPG(id)); err != nil {
+		return fmt.Errorf("store.ClearDeploymentCandidate: %w", err)
+	}
+	return nil
+}
+
+func (s *DeploymentStore) ListCandidates(ctx context.Context) ([]domain.Deployment, error) {
+	rows, err := s.q.ListDeploymentCandidates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store.ListDeploymentCandidates: %w", err)
+	}
+	out := make([]domain.Deployment, len(rows))
+	for i, row := range rows {
+		out[i] = toDomainDeployment(row)
+	}
+	return out, nil
+}
+
 func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status domain.DeploymentStatus) error {
 	err := s.q.UpdateDeploymentStatus(ctx, sqlc.UpdateDeploymentStatusParams{
 		ID:     uuidToPG(id),
@@ -207,7 +244,9 @@ func (s *DeploymentStore) UpdateStatus(ctx context.Context, id uuid.UUID, status
 func (s *DeploymentStore) RequestCancel(ctx context.Context, id uuid.UUID) (domain.Deployment, error) {
 	row, err := s.q.RequestDeploymentCancel(ctx, uuidToPG(id))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) { return domain.Deployment{}, domain.ErrDeploymentNotCancellable }
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Deployment{}, domain.ErrDeploymentNotCancellable
+		}
 		return domain.Deployment{}, fmt.Errorf("store.RequestDeploymentCancel: %w", err)
 	}
 	return toDomainDeployment(row), nil
@@ -222,26 +261,31 @@ func (s *DeploymentStore) MarkCancelled(ctx context.Context, id uuid.UUID) error
 
 func toDomainDeployment(row sqlc.Deployment) domain.Deployment {
 	d := domain.Deployment{
-		ID:               pgToUUID(row.ID),
-		AppID:            pgToUUID(row.AppID),
-		ImageTag:         row.ImageTag,
-		Status:           domain.DeploymentStatus(row.Status),
-		ContainerID:      pgText(row.ContainerID),
-		Port:             pgInt4(row.Port),
-		CommitSHA:        pgText(row.CommitSha),
-		SourceType:       row.SourceType,
-		Repository:       pgText(row.Repository),
-		Branch:           pgText(row.Branch),
-		CommitAuthor:     pgText(row.CommitAuthor),
-		CommitMessage:    pgText(row.CommitMessage),
-		TriggerType:      row.TriggerType,
-		GitHubDeliveryID: pgText(row.GithubDeliveryID),
-		Attempt:          int(row.Attempt),
-		CancelRequested:  row.CancelRequested,
-		DurationMs:       pgInt4(row.DurationMs),
-		CreatedAt:        row.CreatedAt.Time,
+		ID:                   pgToUUID(row.ID),
+		AppID:                pgToUUID(row.AppID),
+		ImageTag:             row.ImageTag,
+		Status:               domain.DeploymentStatus(row.Status),
+		ContainerID:          pgText(row.ContainerID),
+		Port:                 pgInt4(row.Port),
+		CandidateContainerID: pgText(row.CandidateContainerID),
+		CandidatePort:        pgInt4(row.CandidatePort),
+		CommitSHA:            pgText(row.CommitSha),
+		SourceType:           row.SourceType,
+		Repository:           pgText(row.Repository),
+		Branch:               pgText(row.Branch),
+		CommitAuthor:         pgText(row.CommitAuthor),
+		CommitMessage:        pgText(row.CommitMessage),
+		TriggerType:          row.TriggerType,
+		GitHubDeliveryID:     pgText(row.GithubDeliveryID),
+		Attempt:              int(row.Attempt),
+		CancelRequested:      row.CancelRequested,
+		DurationMs:           pgInt4(row.DurationMs),
+		CreatedAt:            row.CreatedAt.Time,
 	}
-	if row.RetryOf.Valid { retry := pgToUUID(row.RetryOf); d.RetryOf = &retry }
+	if row.RetryOf.Valid {
+		retry := pgToUUID(row.RetryOf)
+		d.RetryOf = &retry
+	}
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time
 		d.FinishedAt = &t

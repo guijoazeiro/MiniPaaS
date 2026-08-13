@@ -97,7 +97,10 @@ func main() {
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, depLogStore)
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout})
+	if err := depSvc.RecoverCandidates(ctx); err != nil {
+		log.Warn("recover deployment candidates", "err", err)
+	}
 	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
 	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
 	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)

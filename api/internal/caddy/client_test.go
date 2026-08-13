@@ -16,6 +16,7 @@ type fakeCaddy struct {
 	requests          []recorded
 	hasServer         bool
 	unknownIDOnDelete bool
+	unknownIDOnPatch  bool
 }
 
 type recorded struct {
@@ -44,10 +45,59 @@ func (f *fakeCaddy) handler() http.Handler {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/id/"):
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/id/"):
+			if f.unknownIDOnPatch {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"unknown object id 'minipaas-x'"}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
 	})
+}
+
+func TestSwitchRouteUsesAtomicIDUpdate(t *testing.T) {
+	f := &fakeCaddy{}
+	c := newClient(t, f)
+
+	url, err := c.SwitchRoute(context.Background(), "hello", 32772)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "https://hello.example.dev" {
+		t.Fatalf("url = %q", url)
+	}
+	if len(f.requests) != 1 || f.requests[0].Method != http.MethodPatch || f.requests[0].Path != "/id/minipaas-hello" {
+		t.Fatalf("requests = %+v", f.requests)
+	}
+	var route map[string]any
+	if err := json.Unmarshal([]byte(f.requests[0].Body), &route); err != nil {
+		t.Fatal(err)
+	}
+	handle := route["handle"].([]any)[0].(map[string]any)
+	upstream := handle["upstreams"].([]any)[0].(map[string]any)
+	if upstream["dial"] != "localhost:32772" {
+		t.Fatalf("upstream = %v", upstream["dial"])
+	}
+}
+
+func TestSwitchRouteCreatesWhenIDDoesNotExist(t *testing.T) {
+	f := &fakeCaddy{unknownIDOnPatch: true}
+	c := newClient(t, f)
+
+	if _, err := c.SwitchRoute(context.Background(), "hello", 32772); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests) != 2 || f.requests[0].Method != http.MethodPatch || f.requests[1].Method != http.MethodPost {
+		t.Fatalf("requests = %+v", f.requests)
+	}
+	if f.requests[1].Path != "/config/apps/http/servers/srv0/routes" {
+		t.Fatalf("create request = %+v", f.requests[1])
+	}
 }
 
 func newClient(t *testing.T, f *fakeCaddy) *Client {
