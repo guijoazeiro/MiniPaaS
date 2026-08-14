@@ -91,7 +91,8 @@ func (h *AppHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.stopper.StopApp(c.Request.Context(), app); err != nil {
-		h.log.Warn("stop app", "app", app.Name, "err", err)
+		respondError(c, h.log, err)
+		return
 	}
 	if err := h.svc.Delete(c.Request.Context(), app.ID); err != nil {
 		respondError(c, h.log, err)

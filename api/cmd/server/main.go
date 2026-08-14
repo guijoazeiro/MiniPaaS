@@ -175,11 +175,15 @@ func main() {
 	r.GET("/ready", readyH.Serve)
 	r.POST("/auth/login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.Login)
 	r.POST("/auth/web-login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.WebLogin)
+	r.POST("/auth/register", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.Register)
 	r.POST("/auth/logout", authH.Logout)
 	r.POST("/integrations/github/webhook", webhookRateLimiter.RateLimit(middleware.RemoteIPKey), githubWebhookH.Handle)
 
 	auth := r.Group("/", middleware.Auth(authSvc))
 
+	auth.GET("/me", authH.Me)
+	auth.PATCH("/me", authH.UpdateMe)
+	auth.PATCH("/me/password", authH.UpdatePassword)
 	auth.POST("/apps", appH.Create)
 	auth.GET("/apps", appH.List)
 	auth.GET("/apps/:name", appH.Get)

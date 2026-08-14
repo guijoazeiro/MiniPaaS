@@ -196,6 +196,11 @@ func (h *DeploymentHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
 		return
 	}
+	app, err := h.apps.GetByName(c.Request.Context(), c.Param("name"))
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
 	dep, err := h.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, domain.ErrDeploymentNotFound) {
@@ -203,6 +208,10 @@ func (h *DeploymentHandler) Get(c *gin.Context) {
 			return
 		}
 		respondError(c, h.log, err)
+		return
+	}
+	if dep.AppID != app.ID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 		return
 	}
 	c.JSON(http.StatusOK, dep)

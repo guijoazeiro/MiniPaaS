@@ -9,12 +9,13 @@ import (
 )
 
 type App struct {
-	ID        pgtype.UUID        `json:"id"`
-	Name      string             `json:"name"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	PublicUrl pgtype.Text        `json:"public_url"`
+	ID          pgtype.UUID        `json:"id"`
+	Name        string             `json:"name"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	PublicUrl   pgtype.Text        `json:"public_url"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
 }
 
 type AppGitSource struct {

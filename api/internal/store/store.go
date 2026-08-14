@@ -29,6 +29,9 @@ type CustomDomainStore interface {
 type UserStore interface {
 	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
 	GetByUsername(ctx context.Context, username string) (domain.User, error)
+	GetByID(ctx context.Context, id uuid.UUID) (domain.User, error)
+	UpdateUsername(ctx context.Context, id uuid.UUID, username string) (domain.User, error)
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	Count(ctx context.Context) (int64, error)
 }
 

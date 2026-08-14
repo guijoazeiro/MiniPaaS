@@ -5,5 +5,6 @@ VALUES (sqlc.narg('user_id'), sqlc.arg('action'), sqlc.arg('method'), sqlc.arg('
 -- name: ListAuditEvents :many
 SELECT id, user_id, action, method, path, status_code, request_id, created_at
 FROM audit_events
+WHERE (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id'))
 ORDER BY id DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');

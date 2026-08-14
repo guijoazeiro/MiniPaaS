@@ -10,11 +10,26 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 )
 
 type fakeAuthService struct{}
 
 func (fakeAuthService) Login(context.Context, string, string) (string, time.Time, error) {
+	return "test-token", time.Now().Add(time.Hour), nil
+}
+func (fakeAuthService) Register(context.Context, string, string) (domain.User, error) {
+	return domain.User{ID: uuid.New(), Username: "test"}, nil
+}
+func (fakeAuthService) Profile(context.Context, uuid.UUID) (domain.User, error) {
+	return domain.User{ID: uuid.New(), Username: "test"}, nil
+}
+func (fakeAuthService) UpdateUsername(context.Context, uuid.UUID, string) (domain.User, error) {
+	return domain.User{ID: uuid.New(), Username: "test"}, nil
+}
+func (fakeAuthService) UpdatePassword(context.Context, uuid.UUID, string, string) error { return nil }
+func (fakeAuthService) RefreshToken(context.Context, uuid.UUID) (string, time.Time, error) {
 	return "test-token", time.Now().Add(time.Hour), nil
 }
 

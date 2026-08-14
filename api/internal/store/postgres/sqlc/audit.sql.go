@@ -40,17 +40,19 @@ func (q *Queries) CreateAuditEvent(ctx context.Context, arg CreateAuditEventPara
 const listAuditEvents = `-- name: ListAuditEvents :many
 SELECT id, user_id, action, method, path, status_code, request_id, created_at
 FROM audit_events
+WHERE ($1::uuid IS NULL OR user_id = $1)
 ORDER BY id DESC
-LIMIT $2 OFFSET $1
+LIMIT $3 OFFSET $2
 `
 
 type ListAuditEventsParams struct {
-	Offset int32 `json:"offset"`
-	Limit  int32 `json:"limit"`
+	UserID pgtype.UUID `json:"user_id"`
+	Offset int32       `json:"offset"`
+	Limit  int32       `json:"limit"`
 }
 
 func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error) {
-	rows, err := q.db.Query(ctx, listAuditEvents, arg.Offset, arg.Limit)
+	rows, err := q.db.Query(ctx, listAuditEvents, arg.UserID, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

@@ -29,15 +29,17 @@ FROM deployments d
 JOIN apps a ON a.id = d.app_id
 WHERE ($1::text IS NULL OR a.name = $1)
   AND ($2::text IS NULL OR d.status = $2)
+  AND ($3::uuid IS NULL OR a.owner_user_id = $3)
 `
 
 type CountDeploymentsParams struct {
-	AppName pgtype.Text `json:"app_name"`
-	Status  pgtype.Text `json:"status"`
+	AppName     pgtype.Text `json:"app_name"`
+	Status      pgtype.Text `json:"status"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) CountDeployments(ctx context.Context, arg CountDeploymentsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDeployments, arg.AppName, arg.Status)
+	row := q.db.QueryRow(ctx, countDeployments, arg.AppName, arg.Status, arg.OwnerUserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -436,15 +438,17 @@ FROM deployments d
 JOIN apps a ON a.id = d.app_id
 WHERE ($1::text IS NULL OR a.name = $1)
   AND ($2::text IS NULL OR d.status = $2)
+  AND ($3::uuid IS NULL OR a.owner_user_id = $3)
 ORDER BY d.created_at DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListDeploymentsParams struct {
-	AppName pgtype.Text `json:"app_name"`
-	Status  pgtype.Text `json:"status"`
-	Off     int32       `json:"off"`
-	Lim     int32       `json:"lim"`
+	AppName     pgtype.Text `json:"app_name"`
+	Status      pgtype.Text `json:"status"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+	Off         int32       `json:"off"`
+	Lim         int32       `json:"lim"`
 }
 
 type ListDeploymentsRow struct {
@@ -477,6 +481,7 @@ func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams
 	rows, err := q.db.Query(ctx, listDeployments,
 		arg.AppName,
 		arg.Status,
+		arg.OwnerUserID,
 		arg.Off,
 		arg.Lim,
 	)
