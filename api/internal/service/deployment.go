@@ -51,10 +51,12 @@ type DeploymentLogWriter interface {
 }
 
 type DeploymentServiceOptions struct {
-	Logs          DeploymentLogWriter
-	ReadyTimeout  time.Duration
-	CustomDomains CustomDomainRouteSync
-	RuntimeLimits docker.ResourceLimits
+	Logs                DeploymentLogWriter
+	ReadyTimeout        time.Duration
+	BuildTimeout        time.Duration
+	MaxConcurrentBuilds int
+	CustomDomains       CustomDomainRouteSync
+	RuntimeLimits       docker.ResourceLimits
 }
 
 type DeploymentService struct {
@@ -70,6 +72,8 @@ type DeploymentService struct {
 	log               *slog.Logger
 	logs              DeploymentLogWriter
 	readyTimeout      time.Duration
+	buildTimeout      time.Duration
+	buildSlots        chan struct{}
 	customDomains     CustomDomainRouteSync
 	runtimeLimits     docker.ResourceLimits
 	executionsMu      sync.Mutex
@@ -88,6 +92,8 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 	}
 	var logWriter DeploymentLogWriter
 	readyTimeout := 60 * time.Second
+	buildTimeout := 15 * time.Minute
+	maxConcurrentBuilds := 2
 	var customRoutes CustomDomainRouteSync
 	var runtimeLimits docker.ResourceLimits
 	for _, option := range options {
@@ -96,6 +102,12 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		}
 		if option.ReadyTimeout > 0 {
 			readyTimeout = option.ReadyTimeout
+		}
+		if option.BuildTimeout > 0 {
+			buildTimeout = option.BuildTimeout
+		}
+		if option.MaxConcurrentBuilds > 0 {
+			maxConcurrentBuilds = option.MaxConcurrentBuilds
 		}
 		if option.CustomDomains != nil {
 			customRoutes = option.CustomDomains
@@ -109,6 +121,7 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		docker: dk, caddy: cd, env: env,
 		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter, readyTimeout: readyTimeout,
 		customDomains: customRoutes, runtimeLimits: runtimeLimits,
+		buildTimeout: buildTimeout, buildSlots: make(chan struct{}, maxConcurrentBuilds),
 		executions: make(map[uuid.UUID]*deploymentExecution),
 		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
@@ -136,6 +149,18 @@ func (s *DeploymentService) beginExecution(ctx context.Context, deploymentID uui
 		s.executionsMu.Unlock()
 	}
 	return runCtx, done
+}
+
+func (s *DeploymentService) acquireBuild(ctx context.Context) (func(), error) {
+	if s.buildSlots == nil {
+		return func() {}, nil
+	}
+	select {
+	case s.buildSlots <- struct{}{}:
+		return func() { <-s.buildSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) (domain.Deployment, error) {
@@ -256,6 +281,19 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return err
 	}
 	s.event(ctx, dep.ID, "queued", "system", "Deployment iniciado")
+	releaseBuildSlot, err := s.acquireBuild(ctx)
+	if err != nil {
+		return s.finishCancelled(ctx, dep, app.ID, "aguardando limite de builds")
+	}
+	releasedBuild := false
+	releaseBuild := func() {
+		if releasedBuild {
+			return
+		}
+		releasedBuild = true
+		releaseBuildSlot()
+	}
+	defer releaseBuild()
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
@@ -265,16 +303,26 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 	}
 	s.event(ctx, dep.ID, "building", "system", "Construindo imagem Docker")
 
+	buildCtx := ctx
+	cancelBuild := func() {}
+	if s.buildTimeout > 0 {
+		buildCtx, cancelBuild = context.WithTimeout(ctx, s.buildTimeout)
+	}
 	var buildLog io.ReadCloser
-	var err error
 	if dockerfile == "" || dockerfile == "Dockerfile" {
-		buildLog, err = s.docker.BuildImage(ctx, src, dep.ImageTag)
+		buildLog, err = s.docker.BuildImage(buildCtx, src, dep.ImageTag)
 	} else if builder, ok := s.docker.(DockerfileBuilder); ok {
-		buildLog, err = builder.BuildImageWithDockerfile(ctx, src, dep.ImageTag, dockerfile)
+		buildLog, err = builder.BuildImageWithDockerfile(buildCtx, src, dep.ImageTag, dockerfile)
 	} else {
 		err = fmt.Errorf("custom Dockerfile builds are unavailable")
 	}
 	if err != nil {
+		cancelBuild()
+		if errors.Is(buildCtx.Err(), context.DeadlineExceeded) {
+			s.event(context.WithoutCancel(ctx), dep.ID, "error", "stderr", "tempo limite da construção Docker excedido")
+			s.markFailed(context.WithoutCancel(ctx), dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: build timeout: %w", buildCtx.Err())
+		}
 		if ctx.Err() != nil {
 			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
 		}
@@ -282,8 +330,14 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
 	}
-	if err := s.persistBuildOutput(ctx, dep.ID, buildLog); err != nil {
+	if err := s.persistBuildOutput(buildCtx, dep.ID, buildLog); err != nil {
 		_ = buildLog.Close()
+		cancelBuild()
+		if errors.Is(buildCtx.Err(), context.DeadlineExceeded) {
+			s.event(context.WithoutCancel(ctx), dep.ID, "error", "stderr", "tempo limite da construção Docker excedido")
+			s.markFailed(context.WithoutCancel(ctx), dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: build timeout: %w", buildCtx.Err())
+		}
 		if ctx.Err() != nil {
 			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
 		}
@@ -292,6 +346,8 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return fmt.Errorf("service.RunBuild: read build log: %w", err)
 	}
 	_ = buildLog.Close()
+	cancelBuild()
+	releaseBuild()
 	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
 		return err
 	}

@@ -53,6 +53,9 @@ func TestLoadUsesDefaultMaxDeploySize(t *testing.T) {
 	if cfg.GitCloneTimeout.String() != "10m0s" {
 		t.Fatalf("GitCloneTimeout = %s, want 10m", cfg.GitCloneTimeout)
 	}
+	if cfg.BuildTimeout != 15*time.Minute || cfg.MaxConcurrentBuilds != 2 {
+		t.Fatalf("build limits = timeout:%s concurrency:%d, want 15m/2", cfg.BuildTimeout, cfg.MaxConcurrentBuilds)
+	}
 	if cfg.RateLimitWindow != time.Minute {
 		t.Fatalf("RateLimitWindow = %s, want 1m", cfg.RateLimitWindow)
 	}
@@ -64,6 +67,24 @@ func TestLoadUsesDefaultMaxDeploySize(t *testing.T) {
 	}
 	if cfg.ReadinessTimeout != 3*time.Second {
 		t.Fatalf("ReadinessTimeout = %s, want 3s", cfg.ReadinessTimeout)
+	}
+}
+
+func TestLoadRejectsInvalidBuildLimits(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://postgres:postgres@localhost/minipaas")
+	t.Setenv("BASE_DOMAIN", "example.test")
+	t.Setenv("JWT_SECRET", "secret")
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a", 64))
+	t.Setenv("CADDY_ADMIN_URL", "http://localhost:2019")
+	t.Setenv("BUILD_TIMEOUT", "0s")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BUILD_TIMEOUT") {
+		t.Fatalf("Load() error = %v, want invalid BUILD_TIMEOUT error", err)
+	}
+
+	t.Setenv("BUILD_TIMEOUT", "15m")
+	t.Setenv("MAX_CONCURRENT_BUILDS", "0")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MAX_CONCURRENT_BUILDS") {
+		t.Fatalf("Load() error = %v, want invalid MAX_CONCURRENT_BUILDS error", err)
 	}
 }
 

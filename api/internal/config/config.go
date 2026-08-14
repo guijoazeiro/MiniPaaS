@@ -31,6 +31,8 @@ type Config struct {
 	MaxDeploySize           int64
 	MaxRepositorySize       int64
 	GitCloneTimeout         time.Duration
+	BuildTimeout            time.Duration
+	MaxConcurrentBuilds     int
 	GitHubAppID             int64
 	GitHubAppSlug           string
 	GitHubAppPrivateKeyPath string
@@ -111,6 +113,14 @@ func Load() (*Config, error) {
 	if err != nil || gitCloneTimeout <= 0 {
 		return nil, fmt.Errorf("config: GIT_CLONE_TIMEOUT must be a positive duration")
 	}
+	buildTimeout, err := time.ParseDuration(env("BUILD_TIMEOUT", "15m"))
+	if err != nil || buildTimeout <= 0 {
+		return nil, fmt.Errorf("config: BUILD_TIMEOUT must be a positive duration")
+	}
+	maxConcurrentBuilds, err := parsePositiveLimit("MAX_CONCURRENT_BUILDS", "2")
+	if err != nil {
+		return nil, err
+	}
 	rateLimitWindow, err := time.ParseDuration(env("RATE_LIMIT_WINDOW", "1m"))
 	if err != nil || rateLimitWindow <= 0 {
 		return nil, fmt.Errorf("config: RATE_LIMIT_WINDOW must be a positive duration")
@@ -164,6 +174,8 @@ func Load() (*Config, error) {
 		MaxDeploySize:           maxDeploySizeMB * 1024 * 1024,
 		MaxRepositorySize:       maxRepositorySizeMB * 1024 * 1024,
 		GitCloneTimeout:         gitCloneTimeout,
+		BuildTimeout:            buildTimeout,
+		MaxConcurrentBuilds:     maxConcurrentBuilds,
 		GitHubAppID:             githubAppID,
 		GitHubAppSlug:           githubAppSlug,
 		GitHubAppPrivateKeyPath: githubAppKeyPath,

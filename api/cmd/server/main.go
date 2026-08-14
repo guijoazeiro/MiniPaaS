@@ -80,6 +80,7 @@ func main() {
 	gitSourceStore := postgres.NewGitSourceStore(q)
 	githubInstallationStore := postgres.NewGitHubInstallationStore(q)
 	githubWebhookStore := postgres.NewGitHubWebhookDeliveryStore(q)
+	auditStore := postgres.NewAuditStore(q)
 
 	var githubClient service.GitHubAppClient
 	var githubTokens sourcegit.InstallationTokenProvider
@@ -101,10 +102,12 @@ func main() {
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
 	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
 	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{
-		Logs:          depLogStore,
-		ReadyTimeout:  cfg.DeployReadyTimeout,
-		CustomDomains: domainSvc,
-		RuntimeLimits: docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
+		Logs:                depLogStore,
+		ReadyTimeout:        cfg.DeployReadyTimeout,
+		BuildTimeout:        cfg.BuildTimeout,
+		MaxConcurrentBuilds: cfg.MaxConcurrentBuilds,
+		CustomDomains:       domainSvc,
+		RuntimeLimits:       docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
 	})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
@@ -145,6 +148,7 @@ func main() {
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
+	auditH := handler.NewAuditHandler(auditStore, log)
 	wsH := wspkg.New(appStore, dockerCli, depStore, log, cfg.DashboardOrigin)
 	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log, cfg.DashboardOrigin)
 	readyH := handler.NewReadinessHandler(cfg.ReadinessTimeout, map[string]handler.ReadinessProbe{
@@ -157,7 +161,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(middleware.RequestID(), gin.Recovery(), requestLogger(log), corsMiddleware(cfg.DashboardOrigin))
+	r.Use(middleware.RequestID(), gin.Recovery(), requestLogger(log), middleware.Audit(auditStore, log), corsMiddleware(cfg.DashboardOrigin))
 	authRateLimiter := middleware.NewRateLimiter(cfg.AuthRateLimit, cfg.RateLimitWindow)
 	webhookRateLimiter := middleware.NewRateLimiter(cfg.WebhookRateLimit, cfg.RateLimitWindow)
 
@@ -207,6 +211,7 @@ func main() {
 	auth.GET("/integrations/github/callback", githubH.Callback)
 	auth.GET("/integrations/github/installations", githubH.ListInstallations)
 	auth.GET("/integrations/github/installations/:id/repositories", githubH.ListRepositories)
+	auth.GET("/audit", auditH.List)
 
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)
