@@ -107,7 +107,7 @@ func main() {
 		BuildTimeout:        cfg.BuildTimeout,
 		MaxConcurrentBuilds: cfg.MaxConcurrentBuilds,
 		CustomDomains:       domainSvc,
-		RuntimeLimits:       docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
+		RuntimeLimits:       &docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
 	})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)

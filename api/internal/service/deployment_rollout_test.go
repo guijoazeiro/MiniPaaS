@@ -72,6 +72,36 @@ func (s *rolloutStore) UpdateStatus(_ context.Context, id uuid.UUID, status doma
 	s.events = appendEvent(s.events, "status:"+string(status))
 	return nil
 }
+
+func (s *rolloutStore) RequestCancel(_ context.Context, id uuid.UUID) (domain.Deployment, error) {
+	s.target.ID = id
+	s.target.Status = domain.DeploymentStatusCancelRequested
+	s.target.CancelRequested = true
+	return s.target, nil
+}
+
+func (s *rolloutStore) MarkCancelled(_ context.Context, id uuid.UUID) error {
+	s.target.ID = id
+	s.target.Status = domain.DeploymentStatusCancelled
+	s.target.CancelRequested = true
+	return nil
+}
+
+func (s *rolloutStore) CreateGit(context.Context, uuid.UUID, string, string, string) (domain.Deployment, error) {
+	return s.target, nil
+}
+
+func (s *rolloutStore) UpdateGitMetadata(context.Context, uuid.UUID, string, string, string, string) error {
+	return nil
+}
+
+func (s *rolloutStore) CreateGitTriggered(context.Context, uuid.UUID, string, string, string, string, string) (domain.Deployment, error) {
+	return s.target, nil
+}
+
+func (s *rolloutStore) CreateGitRetry(context.Context, uuid.UUID, string, string, string, uuid.UUID, int) (domain.Deployment, error) {
+	return s.target, nil
+}
 func (s *rolloutStore) UpdateCandidate(_ context.Context, id uuid.UUID, containerID string, port int) error {
 	s.target.ID = id
 	s.target.CandidateContainerID = containerID
