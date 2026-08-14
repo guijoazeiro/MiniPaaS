@@ -14,7 +14,7 @@ import (
 const createApp = `-- name: CreateApp :one
 INSERT INTO apps (name)
 VALUES ($1)
-RETURNING id, name, status, created_at, updated_at, public_url
+RETURNING id, name, status, created_at, updated_at, public_url, owner_user_id
 `
 
 func (q *Queries) CreateApp(ctx context.Context, name string) (App, error) {
@@ -27,6 +27,33 @@ func (q *Queries) CreateApp(ctx context.Context, name string) (App, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PublicUrl,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const createAppForUser = `-- name: CreateAppForUser :one
+INSERT INTO apps (name, owner_user_id)
+VALUES ($1, $2)
+RETURNING id, name, status, created_at, updated_at, public_url, owner_user_id
+`
+
+type CreateAppForUserParams struct {
+	Name        string      `json:"name"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) CreateAppForUser(ctx context.Context, arg CreateAppForUserParams) (App, error) {
+	row := q.db.QueryRow(ctx, createAppForUser, arg.Name, arg.OwnerUserID)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PublicUrl,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -40,8 +67,22 @@ func (q *Queries) DeleteApp(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteAppForUser = `-- name: DeleteAppForUser :exec
+DELETE FROM apps WHERE id = $1 AND owner_user_id = $2
+`
+
+type DeleteAppForUserParams struct {
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) DeleteAppForUser(ctx context.Context, arg DeleteAppForUserParams) error {
+	_, err := q.db.Exec(ctx, deleteAppForUser, arg.ID, arg.OwnerUserID)
+	return err
+}
+
 const getAppByID = `-- name: GetAppByID :one
-SELECT id, name, status, created_at, updated_at, public_url FROM apps
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
 WHERE id = $1
 LIMIT 1
 `
@@ -56,12 +97,39 @@ func (q *Queries) GetAppByID(ctx context.Context, id pgtype.UUID) (App, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PublicUrl,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const getAppByIDForUser = `-- name: GetAppByIDForUser :one
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
+WHERE id = $1 AND owner_user_id = $2
+LIMIT 1
+`
+
+type GetAppByIDForUserParams struct {
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) GetAppByIDForUser(ctx context.Context, arg GetAppByIDForUserParams) (App, error) {
+	row := q.db.QueryRow(ctx, getAppByIDForUser, arg.ID, arg.OwnerUserID)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PublicUrl,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const getAppByName = `-- name: GetAppByName :one
-SELECT id, name, status, created_at, updated_at, public_url FROM apps
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
 WHERE name = $1
 LIMIT 1
 `
@@ -76,12 +144,39 @@ func (q *Queries) GetAppByName(ctx context.Context, name string) (App, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.PublicUrl,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const getAppByNameForUser = `-- name: GetAppByNameForUser :one
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
+WHERE name = $1 AND owner_user_id = $2
+LIMIT 1
+`
+
+type GetAppByNameForUserParams struct {
+	Name        string      `json:"name"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) GetAppByNameForUser(ctx context.Context, arg GetAppByNameForUserParams) (App, error) {
+	row := q.db.QueryRow(ctx, getAppByNameForUser, arg.Name, arg.OwnerUserID)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PublicUrl,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const listApps = `-- name: ListApps :many
-SELECT id, name, status, created_at, updated_at, public_url FROM apps
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
 ORDER BY created_at DESC
 `
 
@@ -101,6 +196,41 @@ func (q *Queries) ListApps(ctx context.Context) ([]App, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.PublicUrl,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAppsForUser = `-- name: ListAppsForUser :many
+SELECT id, name, status, created_at, updated_at, public_url, owner_user_id FROM apps
+WHERE owner_user_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAppsForUser(ctx context.Context, ownerUserID pgtype.UUID) ([]App, error) {
+	rows, err := q.db.Query(ctx, listAppsForUser, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []App
+	for rows.Next() {
+		var i App
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PublicUrl,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -128,6 +258,23 @@ func (q *Queries) UpdateAppPublicURL(ctx context.Context, arg UpdateAppPublicURL
 	return err
 }
 
+const updateAppPublicURLForUser = `-- name: UpdateAppPublicURLForUser :exec
+UPDATE apps
+SET public_url = $1, updated_at = now()
+WHERE id = $2 AND owner_user_id = $3
+`
+
+type UpdateAppPublicURLForUserParams struct {
+	PublicUrl   pgtype.Text `json:"public_url"`
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) UpdateAppPublicURLForUser(ctx context.Context, arg UpdateAppPublicURLForUserParams) error {
+	_, err := q.db.Exec(ctx, updateAppPublicURLForUser, arg.PublicUrl, arg.ID, arg.OwnerUserID)
+	return err
+}
+
 const updateAppStatus = `-- name: UpdateAppStatus :exec
 UPDATE apps
 SET status = $1, updated_at = now()
@@ -141,5 +288,22 @@ type UpdateAppStatusParams struct {
 
 func (q *Queries) UpdateAppStatus(ctx context.Context, arg UpdateAppStatusParams) error {
 	_, err := q.db.Exec(ctx, updateAppStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateAppStatusForUser = `-- name: UpdateAppStatusForUser :exec
+UPDATE apps
+SET status = $1, updated_at = now()
+WHERE id = $2 AND owner_user_id = $3
+`
+
+type UpdateAppStatusForUserParams struct {
+	Status      string      `json:"status"`
+	ID          pgtype.UUID `json:"id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) UpdateAppStatusForUser(ctx context.Context, arg UpdateAppStatusForUserParams) error {
+	_, err := q.db.Exec(ctx, updateAppStatusForUser, arg.Status, arg.ID, arg.OwnerUserID)
 	return err
 }

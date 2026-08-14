@@ -913,11 +913,11 @@ func (s *DeploymentService) StopApp(ctx context.Context, app domain.App) error {
 	defer releaseRollout()
 
 	if err := s.caddy.RemoveRoute(ctx, app.Name); err != nil {
-		s.log.Warn("caddy remove route", "app", app.Name, "err", err)
+		return fmt.Errorf("service.StopApp: remove caddy route: %w", err)
 	}
 	if s.customDomains != nil {
 		if err := s.customDomains.RemoveRoutes(ctx, app.ID); err != nil {
-			s.log.Warn("remove custom domain routes", "app", app.Name, "err", err)
+			return fmt.Errorf("service.StopApp: remove custom domain routes: %w", err)
 		}
 	}
 	dep, err := s.deps.GetActive(ctx, app.ID)

@@ -42,6 +42,39 @@ func (f *fakeUserStore) GetByUsername(_ context.Context, u string) (domain.User,
 	return domain.User{}, domain.ErrInvalidCredentials
 }
 
+func (f *fakeUserStore) GetByID(_ context.Context, id uuid.UUID) (domain.User, error) {
+	for _, user := range f.users {
+		if user.ID == id {
+			return user, nil
+		}
+	}
+	return domain.User{}, domain.ErrUserNotFound
+}
+
+func (f *fakeUserStore) UpdateUsername(_ context.Context, id uuid.UUID, username string) (domain.User, error) {
+	user, err := f.GetByID(context.Background(), id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if existing, ok := f.users[username]; ok && existing.ID != id {
+		return domain.User{}, domain.ErrUsernameTaken
+	}
+	delete(f.users, user.Username)
+	user.Username = username
+	f.users[username] = user
+	return user, nil
+}
+
+func (f *fakeUserStore) UpdatePassword(_ context.Context, id uuid.UUID, passwordHash string) error {
+	user, err := f.GetByID(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	user.PasswordHash = passwordHash
+	f.users[user.Username] = user
+	return nil
+}
+
 func TestLoginPreservesStoreErrors(t *testing.T) {
 	svc, users := newAuthSvc(t)
 	dbErr := errors.New("database unavailable")
@@ -138,5 +171,46 @@ func TestSeedAdminIdempotent(t *testing.T) {
 	}
 	if users.countN != 1 {
 		t.Errorf("users created = %d, want 1", users.countN)
+	}
+}
+
+func TestRegisterAndUpdateAccount(t *testing.T) {
+	svc, users := newAuthSvc(t)
+	created, err := svc.Register(context.Background(), "bob", "strong-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Username != "bob" || created.PasswordHash == "" {
+		t.Fatalf("created user = %+v", created)
+	}
+
+	updated, err := svc.UpdateUsername(context.Background(), created.ID, "robert")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != "robert" {
+		t.Fatalf("updated username = %q", updated.Username)
+	}
+	if err := svc.UpdatePassword(context.Background(), created.ID, "strong-pass", "stronger-pass"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Login(context.Background(), "robert", "stronger-pass"); err != nil {
+		t.Fatalf("login with updated credentials: %v", err)
+	}
+	if _, _, err := svc.Login(context.Background(), "robert", "strong-pass"); !errors.Is(err, domain.ErrInvalidCredentials) {
+		t.Fatalf("old password error = %v", err)
+	}
+	if _, ok := users.users["robert"]; !ok {
+		t.Fatal("updated user was not persisted in fake store")
+	}
+}
+
+func TestRegisterValidatesUsernameAndPassword(t *testing.T) {
+	svc, _ := newAuthSvc(t)
+	if _, err := svc.Register(context.Background(), "ab", "strong-pass"); !errors.Is(err, domain.ErrUsernameInvalid) {
+		t.Fatalf("short username error = %v", err)
+	}
+	if _, err := svc.Register(context.Background(), "bob", "short"); !errors.Is(err, domain.ErrPasswordWeak) {
+		t.Fatalf("short password error = %v", err)
 	}
 }

@@ -47,6 +47,7 @@ FROM deployments d
 JOIN apps a ON a.id = d.app_id
 WHERE (sqlc.narg('app_name')::text IS NULL OR a.name = sqlc.narg('app_name'))
   AND (sqlc.narg('status')::text IS NULL OR d.status = sqlc.narg('status'))
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR a.owner_user_id = sqlc.narg('owner_user_id'))
 ORDER BY d.created_at DESC
 LIMIT @lim OFFSET @off;
 
@@ -55,7 +56,8 @@ SELECT COUNT(*)
 FROM deployments d
 JOIN apps a ON a.id = d.app_id
 WHERE (sqlc.narg('app_name')::text IS NULL OR a.name = sqlc.narg('app_name'))
-  AND (sqlc.narg('status')::text IS NULL OR d.status = sqlc.narg('status'));
+  AND (sqlc.narg('status')::text IS NULL OR d.status = sqlc.narg('status'))
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR a.owner_user_id = sqlc.narg('owner_user_id'));
 
 -- name: UpdateDeploymentRunning :exec
 UPDATE deployments

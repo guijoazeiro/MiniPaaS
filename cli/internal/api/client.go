@@ -124,6 +124,10 @@ func (c *Client) GetApp(name string) (*App, error) {
 	return &out, nil
 }
 
+func (c *Client) DeleteApp(name string) error {
+	return c.doJSON(http.MethodDelete, "/apps/"+name, nil, "", nil)
+}
+
 func (c *Client) Deploy(app string, tar io.Reader) (*Deployment, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)

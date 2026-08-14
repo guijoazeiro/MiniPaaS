@@ -139,6 +139,20 @@ These controls should be implemented alongside the phases above rather than post
 
 Phase 13 now provides request correlation, persisted audit events for mutating API requests, sensitive-endpoint rate limiting, bounded Docker builds, optional container resource caps, readiness probes, startup reconciliation of labeled orphan containers, and documented PostgreSQL backup/restore procedures. Distributed rate-limit state and per-application resource settings remain follow-up work for a multi-tenant production release.
 
+## Phase 14.1 — Accounts, ownership, and safe deletion
+
+This phase adds the minimum account and multi-user foundation needed by the dashboard:
+
+- public account registration with username/password validation and rate limiting;
+- authenticated profile lookup and username/password updates;
+- ownership on applications, with owner-scoped app, deployment, log, environment, domain, metrics, and audit queries;
+- migration `015_add_app_owners` to assign existing applications to the first configured user while preserving internal/system access for reconciliation jobs;
+- destructive application deletion through the API, dashboard danger zone, and `minip apps delete <name> --yes` CLI command;
+- runtime-first deletion: Caddy routes and containers are cleaned before the database row is removed, and cleanup errors preserve the row for recovery;
+- dedicated dashboard routes for registration and account settings.
+
+Manual validation remains for the complete browser flow: register a second user, confirm that each account sees only its own applications, update credentials, and delete an application after confirming the exact name.
+
 ## Later opportunities
 
 These ideas can add value after the core Git and safe-deployment experience is solid:

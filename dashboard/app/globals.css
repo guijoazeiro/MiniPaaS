@@ -83,6 +83,24 @@
 .toggle-control.active i { background: var(--violet); transform: translateX(18px); }
 .git-source-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; margin-top: 4px; }
 .text-button.danger { margin-left: auto; color: var(--bad); }
+
+.auth-switch { margin: 18px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+.auth-switch button { border: 0; padding: 0; background: transparent; color: var(--violet-ink); font-weight: 700; }
+.account-page { display: grid; gap: 18px; }
+.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.account-card { min-height: 320px; }
+.account-meta { display: grid; grid-template-columns: auto 1fr; gap: 9px 14px; margin: 20px 0; color: var(--muted); font-size: 12px; }
+.account-meta code { overflow: hidden; color: var(--ink); font: 11px var(--font-geist-mono), monospace; text-overflow: ellipsis; }
+.account-meta strong { color: var(--ink); font-size: 12px; font-weight: 500; }
+.account-note { margin: 0; }
+.danger-zone { border-color: color-mix(in srgb, var(--bad) 38%, var(--line)); }
+.danger-zone .section-heading { border-color: color-mix(in srgb, var(--bad) 25%, var(--line)); }
+.danger-zone .eyebrow, .danger-zone h2 { color: var(--bad); }
+.danger-zone label { margin: 20px 0 13px; }
+.danger-zone label code { color: var(--ink); font: 11px var(--font-geist-mono), monospace; }
+.danger-zone .button { width: fit-content; }
+
+@media (max-width: 760px) { .account-grid { grid-template-columns: 1fr; } }
 .git-help { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .deployment-source { color: var(--violet-ink) !important; }
 .commit-message { overflow: hidden; max-width: 370px; text-overflow: ellipsis; white-space: nowrap; }

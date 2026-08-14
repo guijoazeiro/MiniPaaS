@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 )
 
 type TokenParser interface {
@@ -40,6 +41,7 @@ func Auth(p TokenParser) gin.HandlerFunc {
 		}
 		c.Set(CtxUserID, id)
 		c.Set(CtxUsername, name)
+		c.Request = c.Request.WithContext(authctx.WithUserID(c.Request.Context(), id))
 		c.Next()
 	}
 }

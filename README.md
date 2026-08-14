@@ -27,6 +27,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 12.2 | Operational metrics | ✅ validated |
 | 12.3 | Real-time metrics stream | ✅ validated |
 | 13 | Backend hardening and production readiness | ✅ done |
+| 14.1 | Accounts, app ownership, and safe deletion | ✅ implemented, awaiting manual validation |
 
 ## Stack
 
@@ -306,20 +307,25 @@ docker compose down                     # stop Postgres; keep the volume
 # Or use `docker compose down -v` instead to erase the database volume.
 ```
 
-There is no `minip apps delete` command yet. To remove an app and its deployment history, call the API directly:
+To remove an app and its deployment history, require an explicit confirmation:
 
 ```powershell
-curl.exe -X DELETE http://localhost:8080/apps/hello -H "Authorization: Bearer <token>"
+.\minip.exe apps delete hello --yes
 ```
 
 ## API
 
-All protected endpoints require `Authorization: Bearer <token>` (or the dashboard HTTP-only cookie). The public endpoints are `/health`, `/ready`, `/auth/login`, `/auth/web-login`, `/auth/logout`, and the signed GitHub webhook receiver.
+All protected endpoints require `Authorization: Bearer <token>` (or the dashboard HTTP-only cookie). The public endpoints are `/health`, `/ready`, `/auth/login`, `/auth/web-login`, `/auth/register`, `/auth/logout`, and the signed GitHub webhook receiver.
 
 ```
 GET    /health                        → { status: "ok" } (database health check)
 GET    /ready                         → dependency readiness for database, Docker, and Caddy
 POST   /auth/login                    { username, password } → { token, expires_at }
+POST   /auth/register                 { username, password } → User
+
+GET    /me                            → User (without password hash)
+PATCH  /me                            { username } → User
+PATCH  /me/password                   { current_password, new_password } → 204
 
 POST   /apps                          { name } → App
 GET    /apps                          → []App
@@ -359,6 +365,12 @@ WS     /apps/:name/metrics/stream                (active container; authenticate
 GET    /apps/:name/deployments/:id/logs?after=0&limit=500 (persisted build events)
 ```
 
+Registration accepts usernames with 3–64 characters (`A–Z`, `a–z`, digits, `_`, `-`, or `.`) and passwords with at least 8 characters. The dashboard sends the user to login after a successful registration; changing the username or password renews the browser session cookie.
+
+Applications created through an authenticated request are owned by that user. Application lists, project details, deployments, logs, environment variables, custom domains, metrics, and audit events are scoped to the authenticated owner. Existing applications are assigned to the first configured user by migration `015`; internal jobs and legacy system contexts can still access unowned records for reconciliation and webhook processing.
+
+Deleting an application is intentionally destructive. `DELETE /apps/:name` removes its Caddy routes and runtime before deleting the database row; if runtime cleanup fails, the database row is preserved so the orphan can be recovered safely. The dashboard exposes this action in the project's **Zona de perigo** after requiring the exact application name.
+
 Rollback is synchronous: the API responds after Docker starts the selected image and Caddy updates its route.
 
 Deployment status transitions:
@@ -396,6 +408,7 @@ minip login                            # host + username + password → OS user 
 minip apps create <name>
 minip apps list
 minip apps info <name>                 # status + container state + public URL + recent deployments
+minip apps delete <name> --yes         # stop runtime, remove routes, and delete app history
 minip apps retry <name> <deployment-id> # retry a failed/cancelled Git deployment
 minip apps cancel <name> <deployment-id> # cancel a pending/building deployment
 minip apps connect-github <name> --repo owner/repository

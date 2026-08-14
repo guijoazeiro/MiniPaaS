@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
@@ -136,12 +137,16 @@ func (s *DeploymentStore) ListByApp(ctx context.Context, appID uuid.UUID, limit 
 }
 
 func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, limit, offset int) ([]domain.DeploymentListItem, error) {
-	rows, err := s.q.ListDeployments(ctx, sqlc.ListDeploymentsParams{
+	params := sqlc.ListDeploymentsParams{
 		AppName: pgtype.Text{String: appName, Valid: appName != ""},
 		Status:  pgtype.Text{String: status, Valid: status != ""},
 		Lim:     int32(limit),
 		Off:     int32(offset),
-	})
+	}
+	if ownerID, ok := authctx.UserID(ctx); ok {
+		params.OwnerUserID = uuidToPG(ownerID)
+	}
+	rows, err := s.q.ListDeployments(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("store.ListDeployments: %w", err)
 	}
@@ -162,10 +167,14 @@ func (s *DeploymentStore) ListAll(ctx context.Context, appName, status string, l
 }
 
 func (s *DeploymentStore) CountAll(ctx context.Context, appName, status string) (int64, error) {
-	total, err := s.q.CountDeployments(ctx, sqlc.CountDeploymentsParams{
+	params := sqlc.CountDeploymentsParams{
 		AppName: pgtype.Text{String: appName, Valid: appName != ""},
 		Status:  pgtype.Text{String: status, Valid: status != ""},
-	})
+	}
+	if ownerID, ok := authctx.UserID(ctx); ok {
+		params.OwnerUserID = uuidToPG(ownerID)
+	}
+	total, err := s.q.CountDeployments(ctx, params)
 	if err != nil {
 		return 0, fmt.Errorf("store.CountDeployments: %w", err)
 	}

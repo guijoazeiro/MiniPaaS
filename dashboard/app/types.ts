@@ -1,5 +1,11 @@
 export type Theme = "light" | "dark";
 
+export type User = {
+  id: string;
+  username: string;
+  created_at: string;
+};
+
 export type App = {
   id: string;
   name: string;

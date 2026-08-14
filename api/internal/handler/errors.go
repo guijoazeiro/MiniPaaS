@@ -11,13 +11,13 @@ import (
 
 func respondError(c *gin.Context, log *slog.Logger, err error) {
 	switch {
-	case errors.Is(err, domain.ErrAppNotFound), errors.Is(err, domain.ErrDeploymentNotFound), errors.Is(err, domain.ErrGitSourceNotFound), errors.Is(err, domain.ErrGitHubInstallationNotFound), errors.Is(err, domain.ErrCustomDomainNotFound):
+	case errors.Is(err, domain.ErrAppNotFound), errors.Is(err, domain.ErrDeploymentNotFound), errors.Is(err, domain.ErrGitSourceNotFound), errors.Is(err, domain.ErrGitHubInstallationNotFound), errors.Is(err, domain.ErrCustomDomainNotFound), errors.Is(err, domain.ErrUserNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrAppNameTaken), errors.Is(err, domain.ErrCustomDomainTaken):
+	case errors.Is(err, domain.ErrAppNameTaken), errors.Is(err, domain.ErrCustomDomainTaken), errors.Is(err, domain.ErrUsernameTaken):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrDeploymentActive), errors.Is(err, domain.ErrDeploymentNotRollbackable), errors.Is(err, domain.ErrDeploymentNotCancellable), errors.Is(err, domain.ErrDeploymentNotRetryable), errors.Is(err, domain.ErrDeploymentRetryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrAppNameInvalid), errors.Is(err, domain.ErrEnvKeyInvalid), errors.Is(err, domain.ErrGitRepositoryInvalid), errors.Is(err, domain.ErrGitRefInvalid), errors.Is(err, domain.ErrGitPathInvalid), errors.Is(err, domain.ErrDockerfileNotFound), errors.Is(err, domain.ErrGitHubInstallationInvalid), errors.Is(err, domain.ErrGitHubRepositoryNotAccessible), errors.Is(err, domain.ErrCustomDomainInvalid):
+	case errors.Is(err, domain.ErrAppNameInvalid), errors.Is(err, domain.ErrUsernameInvalid), errors.Is(err, domain.ErrPasswordWeak), errors.Is(err, domain.ErrEnvKeyInvalid), errors.Is(err, domain.ErrGitRepositoryInvalid), errors.Is(err, domain.ErrGitRefInvalid), errors.Is(err, domain.ErrGitPathInvalid), errors.Is(err, domain.ErrDockerfileNotFound), errors.Is(err, domain.ErrGitHubInstallationInvalid), errors.Is(err, domain.ErrGitHubRepositoryNotAccessible), errors.Is(err, domain.ErrCustomDomainInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrCustomDomainDNSNotConfigured), errors.Is(err, domain.ErrCustomDomainNotVerified):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})

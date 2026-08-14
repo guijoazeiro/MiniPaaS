@@ -11,6 +11,7 @@ import (
 
 var gitRepository, gitBranch, gitContext, gitDockerfile string
 var gitInstallationID, gitRepositoryID int64
+var deleteAppConfirmed bool
 
 var appsCmd = &cobra.Command{
 	Use:   "apps",
@@ -102,6 +103,20 @@ var appsInfoCmd = &cobra.Command{
 			}
 			fmt.Printf("%-38s  %-11s  %-28s  %-6s  %s\n", d.ID, d.Status, source, port, dur)
 		}
+		return nil
+	},
+}
+
+var appsDeleteCmd = &cobra.Command{
+	Use: "delete <name>", Short: "Delete an app and its deployment history", Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !deleteAppConfirmed {
+			return fmt.Errorf("deleting an app is permanent; re-run with --yes to confirm")
+		}
+		if err := apiClient.DeleteApp(args[0]); err != nil {
+			return err
+		}
+		fmt.Printf("deleted: %s\n", args[0])
 		return nil
 	},
 }
@@ -239,11 +254,12 @@ var appsAutoDeployCmd = &cobra.Command{
 }
 
 func init() {
+	appsDeleteCmd.Flags().BoolVarP(&deleteAppConfirmed, "yes", "y", false, "confirm permanent deletion")
 	appsConnectGitHubCmd.Flags().StringVar(&gitRepository, "repo", "", "GitHub repository (owner/repository or URL)")
 	appsConnectGitHubCmd.Flags().StringVar(&gitBranch, "branch", "main", "default branch")
 	appsConnectGitHubCmd.Flags().StringVar(&gitContext, "context", ".", "build context relative to the repository root")
 	appsConnectGitHubCmd.Flags().StringVar(&gitDockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to the build context")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitInstallationID, "installation", 0, "GitHub App installation ID for a private repository")
 	appsConnectGitHubCmd.Flags().Int64Var(&gitRepositoryID, "repository-id", 0, "GitHub repository ID exposed to the installation")
-	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsRetryCmd, appsCancelCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd, appsAutoDeployCmd)
+	appsCmd.AddCommand(appsCreateCmd, appsListCmd, appsInfoCmd, appsDeleteCmd, appsRetryCmd, appsCancelCmd, appsConnectGitHubCmd, appsGitSourceCmd, appsDisconnectGitHubCmd, appsGitHubInstallationsCmd, appsGitHubRepositoriesCmd, appsAutoDeployCmd)
 }

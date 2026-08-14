@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 )
@@ -29,7 +30,11 @@ func (s *AuditStore) Record(ctx context.Context, event store.AuditEvent) error {
 }
 
 func (s *AuditStore) List(ctx context.Context, limit, offset int) ([]store.AuditEvent, error) {
-	rows, err := s.q.ListAuditEvents(ctx, sqlc.ListAuditEventsParams{Limit: int32(limit), Offset: int32(offset)})
+	params := sqlc.ListAuditEventsParams{Limit: int32(limit), Offset: int32(offset)}
+	if userID, ok := authctx.UserID(ctx); ok {
+		params.UserID = nullableUUID(userID)
+	}
+	rows, err := s.q.ListAuditEvents(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("store.ListAuditEvents: %w", err)
 	}
