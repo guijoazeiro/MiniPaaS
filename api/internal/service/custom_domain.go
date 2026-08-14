@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
+	"golang.org/x/net/idna"
 )
 
 type DNSResolver interface {
@@ -29,13 +30,13 @@ type CustomDomainRouteSync interface {
 }
 
 type CustomDomainService struct {
-	domains    store.CustomDomainStore
-	apps       store.AppStore
+	domains     store.CustomDomainStore
+	apps        store.AppStore
 	deployments store.DeploymentStore
-	router     CustomDomainRouter
-	resolver   DNSResolver
-	baseDomain string
-	expectedIP string
+	router      CustomDomainRouter
+	resolver    DNSResolver
+	baseDomain  string
+	expectedIP  string
 }
 
 func NewCustomDomainService(domains store.CustomDomainStore, apps store.AppStore, deployments store.DeploymentStore, router CustomDomainRouter, baseDomain, expectedIP string) *CustomDomainService {
@@ -199,8 +200,20 @@ func (s *CustomDomainService) matchesExpectedIP(addresses []string) bool {
 }
 
 func normalizeHostname(raw, baseDomain string) (string, error) {
-	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
-	if host == "" || len(host) > 253 || host == baseDomain || strings.HasSuffix(host, "."+baseDomain) {
+	// Normalize Unicode hostnames to their DNS ASCII (punycode) form before
+	// applying the ASCII label rules below. This keeps validation and routing
+	// consistent for internationalized domain names.
+	host, err := idna.Lookup.ToASCII(strings.TrimSuffix(strings.TrimSpace(raw), "."))
+	if err != nil {
+		return "", domain.ErrCustomDomainInvalid
+	}
+	host = strings.ToLower(host)
+	normalizedBase, err := idna.Lookup.ToASCII(strings.TrimSuffix(strings.TrimSpace(baseDomain), "."))
+	if err != nil {
+		return "", domain.ErrCustomDomainInvalid
+	}
+	normalizedBase = strings.ToLower(normalizedBase)
+	if host == "" || len(host) > 253 || host == normalizedBase || strings.HasSuffix(host, "."+normalizedBase) {
 		return "", domain.ErrCustomDomainInvalid
 	}
 	labels := strings.Split(host, ".")

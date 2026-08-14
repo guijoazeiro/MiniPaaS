@@ -294,7 +294,7 @@ Non-interactive form:
 .\minip.exe rollback hello --to <deployment-id>
 ```
 
-Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild.
+Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild. The target is started as a candidate and checked before the route changes; the previous container is stopped only after the rollback is promoted successfully.
 
 ### 15. Clean up
 
@@ -338,6 +338,7 @@ GET    /apps/:name/deployments        → []Deployment
 GET    /apps/:name/deployments/:id    → Deployment
 GET    /deployments?page=1&per_page=50&app=&status=
                                        → { items, page, per_page, total }
+GET    /audit?limit=50&offset=0         → recent mutating request audit events
 
 PUT    /apps/:name/source/git         { repository, branch?, build_context?, dockerfile_path? } → GitSource
 GET    /apps/:name/source/git         → GitSource
@@ -578,6 +579,8 @@ DELETE /apps/:name/domains/:id
 ```
 
 Create the DNS record before verifying the domain. Records start as `pending`; after DNS resolution and route activation they become `verified` or `active`, and a failed check is recorded as `error`. MiniPaaS resolves the hostname, optionally compares the result with `PUBLIC_IP`, and then creates the Caddy route. Caddy handles HTTPS automatically when the hostname points to the server and ports 80/443 are reachable. Set `PUBLIC_IP` in production for strict ownership validation; when it is empty, local development accepts any hostname that resolves.
+
+Hostnames are normalized with IDNA to DNS-compatible punycode before validation, so internationalized names such as `média.example.com` are stored and routed as their ASCII representation.
 
 For a local-only test, `nip.io` maps a hostname to an IP encoded in the name. With the API and Caddy running on the same machine, add `api.127.0.0.1.nip.io` in **Configurações → Domínios customizados**, verify it, and test the route:
 
