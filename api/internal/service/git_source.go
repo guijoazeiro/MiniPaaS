@@ -217,11 +217,7 @@ func (s *GitDeploymentService) Retry(ctx context.Context, appName string, target
 		attempt = 2
 	}
 	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
-	retryStore, ok := s.deployments.deps.(store.GitRetryDeploymentStore)
-	if !ok {
-		return domain.Deployment{}, domain.App{}, domain.GitSource{}, fmt.Errorf("service.Retry: git retry deployment store unavailable")
-	}
-	dep, err := retryStore.CreateGitRetry(ctx, app.ID, tag, source.Repository, branch, target.ID, attempt)
+	dep, err := s.deployments.deps.CreateGitRetry(ctx, app.ID, tag, source.Repository, branch, target.ID, attempt)
 	if err != nil {
 		return domain.Deployment{}, domain.App{}, domain.GitSource{}, fmt.Errorf("service.Retry: %w", err)
 	}

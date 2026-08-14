@@ -72,6 +72,22 @@ func (s *rollbackDeploymentStore) UpdateStatus(_ context.Context, _ uuid.UUID, s
 	return nil
 }
 
+func (s *rollbackDeploymentStore) CreateGit(context.Context, uuid.UUID, string, string, string) (domain.Deployment, error) {
+	return domain.Deployment{}, nil
+}
+
+func (s *rollbackDeploymentStore) UpdateGitMetadata(context.Context, uuid.UUID, string, string, string, string) error {
+	return nil
+}
+
+func (s *rollbackDeploymentStore) CreateGitTriggered(context.Context, uuid.UUID, string, string, string, string, string) (domain.Deployment, error) {
+	return domain.Deployment{}, nil
+}
+
+func (s *rollbackDeploymentStore) CreateGitRetry(context.Context, uuid.UUID, string, string, string, uuid.UUID, int) (domain.Deployment, error) {
+	return domain.Deployment{}, nil
+}
+
 func (s *rollbackDeploymentStore) RequestCancel(_ context.Context, id uuid.UUID) (domain.Deployment, error) {
 	s.target.ID = id
 	s.target.Status = domain.DeploymentStatusCancelRequested
@@ -111,6 +127,8 @@ func (s *rollbackAppStore) Delete(context.Context, uuid.UUID) error { return nil
 type rollbackDocker struct {
 	mutations int
 	buildErr  error
+	runErr    error
+	events    *[]string
 }
 
 func (d *rollbackDocker) BuildImage(context.Context, io.Reader, string) (io.ReadCloser, error) {
@@ -262,11 +280,29 @@ func TestRollbackReactivatesStoppedDeployment(t *testing.T) {
 
 func (d *rollbackDocker) RunContainer(context.Context, docker.RunOptions) (docker.ContainerInfo, error) {
 	d.mutations++
+	if d.events != nil {
+		*d.events = append(*d.events, "start")
+	}
+	if d.runErr != nil {
+		return docker.ContainerInfo{}, d.runErr
+	}
 	return docker.ContainerInfo{}, nil
 }
-func (d *rollbackDocker) StopContainer(context.Context, string) error   { d.mutations++; return nil }
-func (d *rollbackDocker) RemoveContainer(context.Context, string) error { d.mutations++; return nil }
-func (d *rollbackDocker) RemoveImage(context.Context, string) error     { return nil }
+func (d *rollbackDocker) StopContainer(context.Context, string) error {
+	d.mutations++
+	if d.events != nil {
+		*d.events = append(*d.events, "stop")
+	}
+	return nil
+}
+func (d *rollbackDocker) RemoveContainer(context.Context, string) error {
+	d.mutations++
+	if d.events != nil {
+		*d.events = append(*d.events, "remove")
+	}
+	return nil
+}
+func (d *rollbackDocker) RemoveImage(context.Context, string) error { return nil }
 
 type rollbackCaddy struct{}
 
@@ -331,5 +367,54 @@ func TestRollbackResolvesEnvironmentBeforeStoppingActiveContainer(t *testing.T) 
 	}
 	if deps.activeCalls != 0 || dk.mutations != 0 || len(deps.statuses) != 0 {
 		t.Fatalf("failed prerequisite caused side effects: active_calls=%d docker_mutations=%d statuses=%v", deps.activeCalls, dk.mutations, deps.statuses)
+	}
+}
+
+func TestRollbackKeepsActiveContainerWhenCandidateFailsToStart(t *testing.T) {
+	appID := uuid.New()
+	targetID := uuid.New()
+	activeID := uuid.New()
+	deps := &rollbackDeploymentStore{
+		target: domain.Deployment{ID: targetID, AppID: appID, ImageTag: "app:previous", Status: domain.DeploymentStatusSuperseded},
+		active: domain.Deployment{ID: activeID, AppID: appID, ContainerID: "active-container", Status: domain.DeploymentStatusRunning},
+	}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app", Status: domain.AppStatusRunning}}
+	dk := &rollbackDocker{runErr: errors.New("docker unavailable")}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	_, err := svc.Rollback(context.Background(), "app", targetID, "test")
+	if err == nil || !strings.Contains(err.Error(), "run candidate container") {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if dk.mutations != 1 {
+		t.Fatalf("docker mutations = %d, want candidate start only", dk.mutations)
+	}
+	if deps.active.ContainerID != "active-container" || len(deps.statuses) != 0 {
+		t.Fatalf("active deployment was changed: container=%q statuses=%v", deps.active.ContainerID, deps.statuses)
+	}
+	if len(apps.statuses) != 0 {
+		t.Fatalf("running app was marked failed despite active container: %v", apps.statuses)
+	}
+}
+
+func TestRollbackStopsPreviousOnlyAfterCandidateStarts(t *testing.T) {
+	appID := uuid.New()
+	targetID := uuid.New()
+	deps := &rollbackDeploymentStore{
+		target: domain.Deployment{ID: targetID, AppID: appID, ImageTag: "app:previous", Status: domain.DeploymentStatusSuperseded},
+		active: domain.Deployment{ID: uuid.New(), AppID: appID, ContainerID: "active-container", Status: domain.DeploymentStatusRunning},
+	}
+	apps := &rollbackAppStore{app: domain.App{ID: appID, Name: "app", Status: domain.AppStatusRunning}}
+	events := []string{}
+	dk := &rollbackDocker{events: &events}
+	svc := newRollbackService(deps, apps, dk, &rollbackEnv{})
+
+	if _, err := svc.Rollback(context.Background(), "app", targetID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	startAt := indexOf(events, "start")
+	stopAt := indexOf(events, "stop")
+	if startAt < 0 || stopAt < 0 || startAt > stopAt {
+		t.Fatalf("rollback docker order = %v", events)
 	}
 }

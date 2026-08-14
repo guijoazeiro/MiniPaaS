@@ -9,6 +9,7 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
@@ -22,6 +23,20 @@ type RunOptions struct {
 	ContainerPort     string
 	RestartPolicy     string
 	RestartMaxRetries int
+	MemoryBytes       int64
+	NanoCPUs          int64
+	PidsLimit         int64
+	Labels            map[string]string
+}
+
+type ResourceLimits struct {
+	MemoryBytes int64
+	NanoCPUs    int64
+	PidsLimit   int64
+}
+
+type ManagedContainer struct {
+	ID string
 }
 
 type ContainerInfo struct {
@@ -57,6 +72,28 @@ func New(host string) (*Client, error) {
 
 func (c *Client) Close() error { return c.cli.Close() }
 
+func (c *Client) Ping(ctx context.Context) error {
+	if _, err := c.cli.Ping(ctx); err != nil {
+		return fmt.Errorf("docker.Ping: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) ListManagedContainers(ctx context.Context) ([]ManagedContainer, error) {
+	items, err := c.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", "com.minipaas.managed=true")),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("docker.ListManagedContainers: %w", err)
+	}
+	managed := make([]ManagedContainer, 0, len(items))
+	for _, item := range items {
+		managed = append(managed, ManagedContainer{ID: item.ID})
+	}
+	return managed, nil
+}
+
 func (c *Client) BuildImage(ctx context.Context, tar io.Reader, tag string) (io.ReadCloser, error) {
 	return c.BuildImageWithDockerfile(ctx, tar, tag, "Dockerfile")
 }
@@ -89,12 +126,19 @@ func (c *Client) RunContainer(ctx context.Context, opts RunOptions) (ContainerIn
 		Image:        opts.Image,
 		Env:          envSlice(opts.Env),
 		ExposedPorts: nat.PortSet{natPort: struct{}{}},
+		Labels:       copyLabels(opts.Labels),
 	}
 	hostCfg := &container.HostConfig{
 		PortBindings: nat.PortMap{
 			natPort: []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: ""}},
 		},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restart)},
+	}
+	hostCfg.Resources.Memory = opts.MemoryBytes
+	hostCfg.Resources.NanoCPUs = opts.NanoCPUs
+	if opts.PidsLimit > 0 {
+		pidsLimit := opts.PidsLimit
+		hostCfg.Resources.PidsLimit = &pidsLimit
 	}
 	hostCfg.RestartPolicy.MaximumRetryCount = opts.RestartMaxRetries
 

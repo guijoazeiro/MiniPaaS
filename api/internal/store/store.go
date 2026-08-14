@@ -112,3 +112,19 @@ type GitHubInstallationStore interface {
 type RollbackStore interface {
 	Record(ctx context.Context, appID, fromDep, toDep uuid.UUID, triggeredBy string) error
 }
+
+type AuditEvent struct {
+	ID        int64     `json:"id"`
+	UserID    uuid.UUID `json:"user_id,omitempty"`
+	Action    string    `json:"action"`
+	Method    string    `json:"method"`
+	Path      string    `json:"path"`
+	Status    int       `json:"status"`
+	RequestID string    `json:"request_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AuditStore interface {
+	Record(ctx context.Context, event AuditEvent) error
+	List(ctx context.Context, limit, offset int) ([]AuditEvent, error)
+}

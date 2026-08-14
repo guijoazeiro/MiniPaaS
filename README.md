@@ -22,10 +22,11 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 10.1 | Signed GitHub webhooks and auto-deploy | ✅ done |
 | 10.2 | Persistent build logs | ✅ done |
 | 10.3 | Retry and cancellation | ✅ done |
-| 11 | Zero-downtime deployments | 🚧 implemented, awaiting end-to-end validation |
-| 12.1 | Custom domains | 🚧 implemented, awaiting DNS/HTTPS validation |
-| 12.2 | Operational metrics | 🚧 implemented, awaiting manual validation |
-| 12.3 | Real-time metrics stream | 🚧 implemented, awaiting manual validation |
+| 11 | Zero-downtime deployments | ✅ validated |
+| 12.1 | Custom domains | ✅ validated |
+| 12.2 | Operational metrics | ✅ validated |
+| 12.3 | Real-time metrics stream | ✅ validated |
+| 13 | Backend hardening and production readiness | ✅ done |
 
 ## Stack
 
@@ -293,7 +294,7 @@ Non-interactive form:
 .\minip.exe rollback hello --to <deployment-id>
 ```
 
-Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild.
+Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild. The target is started as a candidate and checked before the route changes; the previous container is stopped only after the rollback is promoted successfully.
 
 ### 15. Clean up
 
@@ -313,10 +314,11 @@ curl.exe -X DELETE http://localhost:8080/apps/hello -H "Authorization: Bearer <t
 
 ## API
 
-All endpoints require `Authorization: Bearer <token>` except `/health` and `/auth/login`.
+All protected endpoints require `Authorization: Bearer <token>` (or the dashboard HTTP-only cookie). The public endpoints are `/health`, `/ready`, `/auth/login`, `/auth/web-login`, `/auth/logout`, and the signed GitHub webhook receiver.
 
 ```
-GET    /health                        → { status: "ok" }
+GET    /health                        → { status: "ok" } (database health check)
+GET    /ready                         → dependency readiness for database, Docker, and Caddy
 POST   /auth/login                    { username, password } → { token, expires_at }
 
 POST   /apps                          { name } → App
@@ -336,6 +338,7 @@ GET    /apps/:name/deployments        → []Deployment
 GET    /apps/:name/deployments/:id    → Deployment
 GET    /deployments?page=1&per_page=50&app=&status=
                                        → { items, page, per_page, total }
+GET    /audit?limit=50&offset=0         → recent mutating request audit events
 
 PUT    /apps/:name/source/git         { repository, branch?, build_context?, dockerfile_path? } → GitSource
 GET    /apps/:name/source/git         → GitSource
@@ -577,6 +580,8 @@ DELETE /apps/:name/domains/:id
 
 Create the DNS record before verifying the domain. Records start as `pending`; after DNS resolution and route activation they become `verified` or `active`, and a failed check is recorded as `error`. MiniPaaS resolves the hostname, optionally compares the result with `PUBLIC_IP`, and then creates the Caddy route. Caddy handles HTTPS automatically when the hostname points to the server and ports 80/443 are reachable. Set `PUBLIC_IP` in production for strict ownership validation; when it is empty, local development accepts any hostname that resolves.
 
+Hostnames are normalized with IDNA to DNS-compatible punycode before validation, so internationalized names such as `média.example.com` are stored and routed as their ASCII representation.
+
 For a local-only test, `nip.io` maps a hostname to an IP encoded in the name. With the API and Caddy running on the same machine, add `api.127.0.0.1.nip.io` in **Configurações → Domínios customizados**, verify it, and test the route:
 
 ```powershell
@@ -708,7 +713,9 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `DEPLOY_READY_TIMEOUT` | no | `60s` | Maximum time a new candidate container may take to accept TCP connections before the rollout is failed and the current release remains active. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
 | `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
-| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. The Docker build keeps its existing lifecycle. |
+| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. |
+| `BUILD_TIMEOUT` | no | `15m` | Maximum time allowed for one Docker image build before the deployment is failed. |
+| `MAX_CONCURRENT_BUILDS` | no | `2` | Maximum number of Docker image builds running in parallel. Additional deployments remain queued until a slot is available. |
 | `GITHUB_APP_ID` | conditional | — | Numeric App ID used for private repository access. Must be set with the slug and private-key path. |
 | `GITHUB_APP_SLUG` | conditional | — | Slug from the GitHub App settings page. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | conditional | — | Absolute path to the GitHub App private-key PEM. Keep this file outside the repository. |
@@ -716,7 +723,45 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `RESTART_POLICY` | no | `on-failure` | Docker restart policy for app containers: `no`, `always`, `on-failure`, or `unless-stopped`. |
 | `RESTART_MAX_RETRIES` | no | `3` | Maximum retries used by Docker's `on-failure` restart policy. |
 | `DASHBOARD_ORIGIN` | no | `http://localhost:3000` | Browser origin allowed to authenticate with the API dashboard cookie. |
+| `RATE_LIMIT_WINDOW` | no | `1m` | Fixed window used by the in-memory protection for sensitive endpoints. |
+| `AUTH_RATE_LIMIT` | no | `10` | Maximum login and web-login requests per client address during the rate window. |
+| `WEBHOOK_RATE_LIMIT` | no | `120` | Maximum GitHub webhook requests per client address during the rate window. |
+| `CONTAINER_MEMORY_LIMIT_MB` | no | `0` | Optional memory cap applied to every app container, in MiB. `0` means unlimited. |
+| `CONTAINER_NANO_CPUS` | no | `0` | Optional Docker NanoCPUs cap applied to every app container. `0` means unlimited. |
+| `CONTAINER_PIDS_LIMIT` | no | `0` | Optional maximum number of processes per app container. `0` means unlimited. |
+| `READINESS_TIMEOUT` | no | `3s` | Maximum time allowed for the `/ready` dependency probes. |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error` |
+
+Authentication (`/auth/login` and `/auth/web-login`) and the GitHub webhook endpoint return `429 Too Many Requests` with `Retry-After` when their fixed-window limit is reached. The limiter is intentionally in memory and per API process; a multi-instance deployment must move this state to a shared store. The key uses the direct peer address and does not trust arbitrary `X-Forwarded-For` headers.
+
+Every API response includes an `X-Request-ID` UUID. A valid incoming UUID is preserved for correlation; malformed values are replaced. The same ID is included in the structured HTTP request log entry.
+
+When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited. Docker builds are bounded by `BUILD_TIMEOUT` and share the `MAX_CONCURRENT_BUILDS` queue.
+
+The API also reconciles labeled MiniPaaS containers at startup. It preserves every container referenced by a running deployment or candidate rollout and removes only stale containers with the `com.minipaas.managed=true` label. Containers created outside MiniPaaS are never touched.
+
+### PostgreSQL backup and restore
+
+Keep backups outside Git (the repository ignores `backups/`). With the local Compose database running:
+
+```powershell
+New-Item -ItemType Directory -Force backups | Out-Null
+docker compose exec -T postgres pg_dump -U postgres -d minipaas --format=custom > backups/minipaas-$(Get-Date -Format yyyyMMdd-HHmmss).dump
+```
+
+To restore into a disposable or maintenance database, stop the API first, create the target database, and use:
+
+```powershell
+docker compose exec -T postgres createdb -U postgres minipaas_restore
+docker compose cp backups/minipaas-YYYYMMDD-HHMMSS.dump postgres:/tmp/minipaas.restore.dump
+docker compose exec -T postgres pg_restore -U postgres -d minipaas_restore --clean --if-exists /tmp/minipaas.restore.dump
+```
+
+Verify the restore by running the migrations/status checks and the PostgreSQL integration tests against the restored DSN. A backup is only considered usable after a restore has been tested; do not overwrite the live database during a first recovery exercise.
+
+### Audit trail
+
+Every mutating HTTP request (`POST`, `PUT`, `PATCH`, or `DELETE`) is recorded in PostgreSQL after it completes. The record contains the authenticated user when available, route, status code, request ID, and timestamp; request bodies are never persisted, so passwords, environment values, and source contents are excluded. Authenticated operators can inspect recent entries with `GET /audit?limit=50&offset=0`.
 
 ## Development
 
@@ -771,6 +816,9 @@ Coverage today:
 - `caddy` — bootstrap probe + upsert JSON contract + tolerant delete
 - `ws` — line splitter + end-to-end WS handler with a fake Docker stream (via `stdcopy.NewStdWriter`) proving demux, ordering, and frame format
 - `docker` / `ws` — CPU calculation, network/disk aggregation, and shared metrics-stream subscription coverage
+- `handler/middleware` — request IDs and concurrent rate-limit enforcement
+- `handler` — readiness responses for healthy and failed dependencies
+- `service` — rollout serialization and safe managed-container reconciliation
 - `health` — exited/missing containers transition their deployment and app to `failed`; current container state lookup
 - `cli/tarball` — kept/skipped paths, slash-normalized entries
 - `store/postgres` (integration tag) — app persistence, uniqueness constraints, status and public URL updates against a real PostgreSQL instance

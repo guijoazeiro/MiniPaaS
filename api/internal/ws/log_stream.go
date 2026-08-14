@@ -52,13 +52,13 @@ type Handler struct {
 	log      *slog.Logger
 }
 
-func New(apps AppLookup, dk DockerLogs, deps DeploymentLookup, log *slog.Logger) *Handler {
+func New(apps AppLookup, dk DockerLogs, deps DeploymentLookup, log *slog.Logger, dashboardOrigin ...string) *Handler {
 	return &Handler{
 		apps:   apps,
 		docker: dk,
 		deps:   deps,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: websocketOriginChecker(dashboardOrigin...),
 		},
 		log: log,
 	}

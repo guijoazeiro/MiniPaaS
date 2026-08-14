@@ -27,6 +27,19 @@ func New(adminURL, baseDomain string) *Client {
 	}
 }
 
+func (c *Client) Ping(ctx context.Context) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/config/apps/http/servers/"+serverName, nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("caddy.Ping: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("caddy.Ping: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *Client) EnsureBase(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		c.base+"/config/apps/http/servers/"+serverName, nil)

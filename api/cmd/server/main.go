@@ -80,6 +80,7 @@ func main() {
 	gitSourceStore := postgres.NewGitSourceStore(q)
 	githubInstallationStore := postgres.NewGitHubInstallationStore(q)
 	githubWebhookStore := postgres.NewGitHubWebhookDeliveryStore(q)
+	auditStore := postgres.NewAuditStore(q)
 
 	var githubClient service.GitHubAppClient
 	var githubTokens sourcegit.InstallationTokenProvider
@@ -100,10 +101,24 @@ func main() {
 	appSvc := service.NewAppService(appStore)
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
 	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
-	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{Logs: depLogStore, ReadyTimeout: cfg.DeployReadyTimeout, CustomDomains: domainSvc})
+	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{
+		Logs:                depLogStore,
+		ReadyTimeout:        cfg.DeployReadyTimeout,
+		BuildTimeout:        cfg.BuildTimeout,
+		MaxConcurrentBuilds: cfg.MaxConcurrentBuilds,
+		CustomDomains:       domainSvc,
+		RuntimeLimits:       &docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
+	})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
 	}
+	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
+	if removed, err := service.ReconcileManagedContainers(reconcileCtx, dockerCli, depStore); err != nil {
+		log.Warn("reconcile managed containers", "err", err)
+	} else if removed > 0 {
+		log.Info("reconciled managed containers", "removed", removed)
+	}
+	cancelReconcile()
 	githubSvc := service.NewGitHubAppService(appStore, githubInstallationStore, githubClient, githubStates)
 	gitSourceSvc := service.NewGitSourceService(appStore, gitSourceStore, githubSvc)
 	gitPreparer := sourcegit.New(cfg.MaxRepositorySize)
@@ -133,14 +148,22 @@ func main() {
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
 	githubWebhookH := handler.NewGitHubWebhookHandler(webhookSecret, githubWebhookSvc, log)
 	envH := handler.NewEnvHandler(envSvc, appStore, log)
-	wsH := wspkg.New(appStore, dockerCli, depStore, log)
-	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log)
+	auditH := handler.NewAuditHandler(auditStore, log)
+	wsH := wspkg.New(appStore, dockerCli, depStore, log, cfg.DashboardOrigin)
+	metricsWS := wspkg.NewMetricsStreamHandler(appStore, depStore, dockerCli, log, cfg.DashboardOrigin)
+	readyH := handler.NewReadinessHandler(cfg.ReadinessTimeout, map[string]handler.ReadinessProbe{
+		"database": pool.Ping,
+		"docker":   dockerCli.Ping,
+		"caddy":    caddyCli.Ping,
+	}, log)
 
 	if !strings.EqualFold(cfg.LogLevel, "debug") {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger(log), corsMiddleware(cfg.DashboardOrigin))
+	r.Use(middleware.RequestID(), gin.Recovery(), requestLogger(log), middleware.Audit(auditStore, log), corsMiddleware(cfg.DashboardOrigin))
+	authRateLimiter := middleware.NewRateLimiter(cfg.AuthRateLimit, cfg.RateLimitWindow)
+	webhookRateLimiter := middleware.NewRateLimiter(cfg.WebhookRateLimit, cfg.RateLimitWindow)
 
 	r.GET("/health", func(c *gin.Context) {
 		if err := pool.Ping(c.Request.Context()); err != nil {
@@ -149,10 +172,11 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.POST("/auth/login", authH.Login)
-	r.POST("/auth/web-login", authH.WebLogin)
+	r.GET("/ready", readyH.Serve)
+	r.POST("/auth/login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.Login)
+	r.POST("/auth/web-login", authRateLimiter.RateLimit(middleware.RemoteIPKey), authH.WebLogin)
 	r.POST("/auth/logout", authH.Logout)
-	r.POST("/integrations/github/webhook", githubWebhookH.Handle)
+	r.POST("/integrations/github/webhook", webhookRateLimiter.RateLimit(middleware.RemoteIPKey), githubWebhookH.Handle)
 
 	auth := r.Group("/", middleware.Auth(authSvc))
 
@@ -187,6 +211,7 @@ func main() {
 	auth.GET("/integrations/github/callback", githubH.Callback)
 	auth.GET("/integrations/github/installations", githubH.ListInstallations)
 	auth.GET("/integrations/github/installations/:id/repositories", githubH.ListRepositories)
+	auth.GET("/audit", auditH.List)
 
 	auth.GET("/apps/:name/env", envH.List)
 	auth.PUT("/apps/:name/env/:key", envH.Set)
@@ -235,6 +260,7 @@ func requestLogger(log *slog.Logger) gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		log.Info("http",
+			"request_id", middleware.RequestIDValue(c),
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
 			"status", c.Writer.Status(),

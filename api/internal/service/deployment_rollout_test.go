@@ -72,6 +72,36 @@ func (s *rolloutStore) UpdateStatus(_ context.Context, id uuid.UUID, status doma
 	s.events = appendEvent(s.events, "status:"+string(status))
 	return nil
 }
+
+func (s *rolloutStore) RequestCancel(_ context.Context, id uuid.UUID) (domain.Deployment, error) {
+	s.target.ID = id
+	s.target.Status = domain.DeploymentStatusCancelRequested
+	s.target.CancelRequested = true
+	return s.target, nil
+}
+
+func (s *rolloutStore) MarkCancelled(_ context.Context, id uuid.UUID) error {
+	s.target.ID = id
+	s.target.Status = domain.DeploymentStatusCancelled
+	s.target.CancelRequested = true
+	return nil
+}
+
+func (s *rolloutStore) CreateGit(context.Context, uuid.UUID, string, string, string) (domain.Deployment, error) {
+	return s.target, nil
+}
+
+func (s *rolloutStore) UpdateGitMetadata(context.Context, uuid.UUID, string, string, string, string) error {
+	return nil
+}
+
+func (s *rolloutStore) CreateGitTriggered(context.Context, uuid.UUID, string, string, string, string, string) (domain.Deployment, error) {
+	return s.target, nil
+}
+
+func (s *rolloutStore) CreateGitRetry(context.Context, uuid.UUID, string, string, string, uuid.UUID, int) (domain.Deployment, error) {
+	return s.target, nil
+}
 func (s *rolloutStore) UpdateCandidate(_ context.Context, id uuid.UUID, containerID string, port int) error {
 	s.target.ID = id
 	s.target.CandidateContainerID = containerID
@@ -209,6 +239,34 @@ func TestRunBuildReadinessFailureKeepsPreviousContainer(t *testing.T) {
 	}
 	if store.active.ContainerID != "old-container" || store.target.Status != domain.DeploymentStatusFailed {
 		t.Fatalf("active = %#v, target = %#v", store.active, store.target)
+	}
+}
+
+func TestAcquireRolloutSerializesSameApplication(t *testing.T) {
+	svc := NewDeploymentService(nil, nil, nil, nil, nil, nil, 1, "no", 0, slog.Default())
+	appID := uuid.New()
+	release, err := svc.acquireRollout(context.Background(), appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan struct{})
+	go func() {
+		second, secondErr := svc.acquireRollout(context.Background(), appID)
+		if secondErr == nil {
+			second()
+			close(acquired)
+		}
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("second rollout acquired before first was released")
+	case <-time.After(25 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("second rollout did not acquire after first was released")
 	}
 }
 

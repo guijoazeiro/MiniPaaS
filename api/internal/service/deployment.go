@@ -50,14 +50,28 @@ type DeploymentLogWriter interface {
 	Append(ctx context.Context, deploymentID uuid.UUID, stage, stream, message string) (domain.DeploymentLog, error)
 }
 
+// DeploymentRepository contains the capabilities required by every public
+// deployment operation. Optional extensions such as candidate metadata remain
+// type-asserted because older/custom stores can safely omit them.
+type DeploymentRepository interface {
+	store.DeploymentStore
+	store.DeploymentCancellationStore
+	store.GitDeploymentStore
+	store.TriggeredGitDeploymentStore
+	store.GitRetryDeploymentStore
+}
+
 type DeploymentServiceOptions struct {
-	Logs          DeploymentLogWriter
-	ReadyTimeout  time.Duration
-	CustomDomains CustomDomainRouteSync
+	Logs                DeploymentLogWriter
+	ReadyTimeout        time.Duration
+	BuildTimeout        time.Duration
+	MaxConcurrentBuilds int
+	CustomDomains       CustomDomainRouteSync
+	RuntimeLimits       *docker.ResourceLimits
 }
 
 type DeploymentService struct {
-	deps              store.DeploymentStore
+	deps              DeploymentRepository
 	apps              store.AppStore
 	rollbacks         store.RollbackStore
 	docker            DockerRunner
@@ -68,8 +82,14 @@ type DeploymentService struct {
 	restartMaxRetries int
 	log               *slog.Logger
 	logs              DeploymentLogWriter
+	canceller         store.DeploymentCancellationStore
+	gitDeployments    store.GitDeploymentStore
+	triggeredGit      store.TriggeredGitDeploymentStore
 	readyTimeout      time.Duration
+	buildTimeout      time.Duration
+	buildSlots        chan struct{}
 	customDomains     CustomDomainRouteSync
+	runtimeLimits     docker.ResourceLimits
 	executionsMu      sync.Mutex
 	executions        map[uuid.UUID]*deploymentExecution
 	rolloutsMu        sync.Mutex
@@ -80,13 +100,16 @@ type deploymentExecution struct {
 	cancel context.CancelFunc
 }
 
-func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, options ...DeploymentServiceOptions) *DeploymentService {
+func NewDeploymentService(deps DeploymentRepository, apps store.AppStore, rb store.RollbackStore, dk DockerRunner, cd CaddyRouter, env EnvDecryptor, retention int, restartPolicy string, restartMaxRetries int, log *slog.Logger, options ...DeploymentServiceOptions) *DeploymentService {
 	if retention < 1 {
 		retention = 5
 	}
 	var logWriter DeploymentLogWriter
 	readyTimeout := 60 * time.Second
+	buildTimeout := 15 * time.Minute
+	maxConcurrentBuilds := 2
 	var customRoutes CustomDomainRouteSync
+	var runtimeLimits docker.ResourceLimits
 	for _, option := range options {
 		if option.Logs != nil {
 			logWriter = option.Logs
@@ -94,15 +117,26 @@ func NewDeploymentService(deps store.DeploymentStore, apps store.AppStore, rb st
 		if option.ReadyTimeout > 0 {
 			readyTimeout = option.ReadyTimeout
 		}
+		if option.BuildTimeout > 0 {
+			buildTimeout = option.BuildTimeout
+		}
+		if option.MaxConcurrentBuilds > 0 {
+			maxConcurrentBuilds = option.MaxConcurrentBuilds
+		}
 		if option.CustomDomains != nil {
 			customRoutes = option.CustomDomains
+		}
+		if option.RuntimeLimits != nil {
+			runtimeLimits = *option.RuntimeLimits
 		}
 	}
 	return &DeploymentService{
 		deps: deps, apps: apps, rollbacks: rb,
 		docker: dk, caddy: cd, env: env,
-		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter, readyTimeout: readyTimeout,
-		customDomains: customRoutes,
+		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter,
+		canceller: deps, gitDeployments: deps, triggeredGit: deps, readyTimeout: readyTimeout,
+		customDomains: customRoutes, runtimeLimits: runtimeLimits,
+		buildTimeout: buildTimeout, buildSlots: make(chan struct{}, maxConcurrentBuilds),
 		executions: make(map[uuid.UUID]*deploymentExecution),
 		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
@@ -132,6 +166,18 @@ func (s *DeploymentService) beginExecution(ctx context.Context, deploymentID uui
 	return runCtx, done
 }
 
+func (s *DeploymentService) acquireBuild(ctx context.Context) (func(), error) {
+	if s.buildSlots == nil {
+		return func() {}, nil
+	}
+	select {
+	case s.buildSlots <- struct{}{}:
+		return func() { <-s.buildSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) (domain.Deployment, error) {
 	current, err := s.deps.GetByID(ctx, deploymentID)
 	if err != nil {
@@ -140,11 +186,10 @@ func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) 
 	if current.Status != domain.DeploymentStatusPending && current.Status != domain.DeploymentStatusBuilding && current.Status != domain.DeploymentStatusCancelRequested {
 		return domain.Deployment{}, domain.ErrDeploymentNotCancellable
 	}
-	canceller, ok := s.deps.(store.DeploymentCancellationStore)
-	if !ok {
+	if s.canceller == nil {
 		return domain.Deployment{}, fmt.Errorf("service.Cancel: deployment cancellation store unavailable")
 	}
-	if _, err := canceller.RequestCancel(ctx, deploymentID); err != nil {
+	if _, err := s.canceller.RequestCancel(ctx, deploymentID); err != nil {
 		return domain.Deployment{}, err
 	}
 	s.event(ctx, deploymentID, "cleanup", "system", "Cancelamento solicitado")
@@ -154,7 +199,7 @@ func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) 
 	if execution != nil {
 		execution.cancel()
 	} else {
-		if err := canceller.MarkCancelled(ctx, deploymentID); err != nil {
+		if err := s.canceller.MarkCancelled(ctx, deploymentID); err != nil {
 			return domain.Deployment{}, err
 		}
 	}
@@ -190,17 +235,15 @@ func (s *DeploymentService) CreateGitTriggered(ctx context.Context, appName, rep
 	tag := fmt.Sprintf("%s:ts-%d", app.Name, time.Now().UnixNano())
 	var dep domain.Deployment
 	if triggerType == domain.DeploymentTriggerWebhook {
-		gitDeps, ok := s.deps.(store.TriggeredGitDeploymentStore)
-		if !ok {
+		if s.triggeredGit == nil {
 			return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: triggered git deployment store unavailable")
 		}
-		dep, err = gitDeps.CreateGitTriggered(ctx, app.ID, tag, repository, branch, triggerType, deliveryID)
+		dep, err = s.triggeredGit.CreateGitTriggered(ctx, app.ID, tag, repository, branch, triggerType, deliveryID)
 	} else {
-		gitDeps, ok := s.deps.(store.GitDeploymentStore)
-		if !ok {
+		if s.gitDeployments == nil {
 			return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: git deployment store unavailable")
 		}
-		dep, err = gitDeps.CreateGit(ctx, app.ID, tag, repository, branch)
+		dep, err = s.gitDeployments.CreateGit(ctx, app.ID, tag, repository, branch)
 	}
 	if err != nil {
 		return domain.Deployment{}, domain.App{}, fmt.Errorf("service.CreateGit: %w", err)
@@ -250,6 +293,19 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return err
 	}
 	s.event(ctx, dep.ID, "queued", "system", "Deployment iniciado")
+	releaseBuildSlot, err := s.acquireBuild(ctx)
+	if err != nil {
+		return s.finishCancelled(ctx, dep, app.ID, "aguardando limite de builds")
+	}
+	releasedBuild := false
+	releaseBuild := func() {
+		if releasedBuild {
+			return
+		}
+		releasedBuild = true
+		releaseBuildSlot()
+	}
+	defer releaseBuild()
 
 	if err := s.deps.UpdateStatus(ctx, dep.ID, domain.DeploymentStatusBuilding); err != nil {
 		return fmt.Errorf("service.RunBuild: mark building: %w", err)
@@ -259,16 +315,26 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 	}
 	s.event(ctx, dep.ID, "building", "system", "Construindo imagem Docker")
 
+	buildCtx := ctx
+	cancelBuild := func() {}
+	if s.buildTimeout > 0 {
+		buildCtx, cancelBuild = context.WithTimeout(ctx, s.buildTimeout)
+	}
 	var buildLog io.ReadCloser
-	var err error
 	if dockerfile == "" || dockerfile == "Dockerfile" {
-		buildLog, err = s.docker.BuildImage(ctx, src, dep.ImageTag)
+		buildLog, err = s.docker.BuildImage(buildCtx, src, dep.ImageTag)
 	} else if builder, ok := s.docker.(DockerfileBuilder); ok {
-		buildLog, err = builder.BuildImageWithDockerfile(ctx, src, dep.ImageTag, dockerfile)
+		buildLog, err = builder.BuildImageWithDockerfile(buildCtx, src, dep.ImageTag, dockerfile)
 	} else {
 		err = fmt.Errorf("custom Dockerfile builds are unavailable")
 	}
 	if err != nil {
+		cancelBuild()
+		if errors.Is(buildCtx.Err(), context.DeadlineExceeded) {
+			s.event(context.WithoutCancel(ctx), dep.ID, "error", "stderr", "tempo limite da construção Docker excedido")
+			s.markFailed(context.WithoutCancel(ctx), dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: build timeout: %w", buildCtx.Err())
+		}
 		if ctx.Err() != nil {
 			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
 		}
@@ -276,8 +342,14 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		s.markFailed(ctx, dep.ID, app.ID)
 		return fmt.Errorf("service.RunBuild: build image: %w", err)
 	}
-	if err := s.persistBuildOutput(ctx, dep.ID, buildLog); err != nil {
+	if err := s.persistBuildOutput(buildCtx, dep.ID, buildLog); err != nil {
 		_ = buildLog.Close()
+		cancelBuild()
+		if errors.Is(buildCtx.Err(), context.DeadlineExceeded) {
+			s.event(context.WithoutCancel(ctx), dep.ID, "error", "stderr", "tempo limite da construção Docker excedido")
+			s.markFailed(context.WithoutCancel(ctx), dep.ID, app.ID)
+			return fmt.Errorf("service.RunBuild: build timeout: %w", buildCtx.Err())
+		}
 		if ctx.Err() != nil {
 			return s.finishCancelled(ctx, dep, app.ID, "build interrompido")
 		}
@@ -286,6 +358,8 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return fmt.Errorf("service.RunBuild: read build log: %w", err)
 	}
 	_ = buildLog.Close()
+	cancelBuild()
+	releaseBuild()
 	if err := s.checkCancelled(ctx, dep, app.ID); err != nil {
 		return err
 	}
@@ -329,6 +403,14 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		Env:               envVars,
 		RestartPolicy:     s.restartPolicy,
 		RestartMaxRetries: s.restartMaxRetries,
+		MemoryBytes:       s.runtimeLimits.MemoryBytes,
+		NanoCPUs:          s.runtimeLimits.NanoCPUs,
+		PidsLimit:         s.runtimeLimits.PidsLimit,
+		Labels: map[string]string{
+			"com.minipaas.managed":    "true",
+			"com.minipaas.app":        app.Name,
+			"com.minipaas.deployment": dep.ID.String(),
+		},
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -566,8 +648,8 @@ func (s *DeploymentService) checkCancelled(ctx context.Context, dep domain.Deplo
 
 func (s *DeploymentService) finishCancelled(ctx context.Context, dep domain.Deployment, appID uuid.UUID, reason string) error {
 	writeCtx := context.WithoutCancel(ctx)
-	if canceller, ok := s.deps.(store.DeploymentCancellationStore); ok {
-		if err := canceller.MarkCancelled(writeCtx, dep.ID); err != nil {
+	if s.canceller != nil {
+		if err := s.canceller.MarkCancelled(writeCtx, dep.ID); err != nil {
 			s.log.Warn("mark deployment cancelled", "deployment", dep.ID, "err", err)
 		}
 	} else if err := s.deps.UpdateStatus(writeCtx, dep.ID, domain.DeploymentStatusCancelled); err != nil {
@@ -605,11 +687,10 @@ func (s *DeploymentService) persistBuildOutput(ctx context.Context, deploymentID
 }
 
 func (s *DeploymentService) UpdateGitMetadata(ctx context.Context, depID uuid.UUID, sha, author, message, branch string) error {
-	gitDeps, ok := s.deps.(store.GitDeploymentStore)
-	if !ok {
+	if s.gitDeployments == nil {
 		return fmt.Errorf("git deployment store unavailable")
 	}
-	return gitDeps.UpdateGitMetadata(ctx, depID, sha, author, message, branch)
+	return s.gitDeployments.UpdateGitMetadata(ctx, depID, sha, author, message, branch)
 }
 
 func (s *DeploymentService) MarkFailed(ctx context.Context, depID, appID uuid.UUID) {
@@ -648,59 +729,149 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 	}
 	defer releaseRollout()
 
-	var fromID uuid.UUID
+	var previous domain.Deployment
 	current, err := s.deps.GetActive(ctx, app.ID)
 	if err == nil {
 		if current.ID == target.ID {
 			return domain.Deployment{}, domain.ErrDeploymentActive
 		}
-		fromID = current.ID
-		if current.ContainerID != "" {
-			if err := s.docker.StopContainer(ctx, current.ContainerID); err != nil {
-				s.log.Warn("rollback: stop current", "container", current.ContainerID, "err", err)
-			}
-			if err := s.docker.RemoveContainer(ctx, current.ContainerID); err != nil {
-				s.log.Warn("rollback: remove current", "container", current.ContainerID, "err", err)
-			}
-		}
-		if err := s.deps.UpdateStatus(ctx, current.ID, domain.DeploymentStatusRolledBack); err != nil {
-			s.log.Warn("rollback: mark current rolled_back", "err", err)
-		}
+		previous = current
 	} else if !errors.Is(err, domain.ErrDeploymentNotFound) {
 		return domain.Deployment{}, fmt.Errorf("service.Rollback: get active deployment: %w", err)
 	}
+
+	// Keep the current release alive until the rollback candidate has passed
+	// readiness and the route has been switched. This gives rollback the same
+	// zero-downtime safety property as a normal deployment.
+	candidateName := fmt.Sprintf("minipaas-%s-rollback-%s", app.Name, uuid.NewString()[:8])
 	info, err := s.docker.RunContainer(ctx, docker.RunOptions{
 		Image:             target.ImageTag,
-		Name:              fmt.Sprintf("minipaas-%s", app.Name),
+		Name:              candidateName,
 		Env:               envVars,
 		RestartPolicy:     s.restartPolicy,
 		RestartMaxRetries: s.restartMaxRetries,
+		MemoryBytes:       s.runtimeLimits.MemoryBytes,
+		NanoCPUs:          s.runtimeLimits.NanoCPUs,
+		PidsLimit:         s.runtimeLimits.PidsLimit,
+		Labels: map[string]string{
+			"com.minipaas.managed":    "true",
+			"com.minipaas.app":        app.Name,
+			"com.minipaas.deployment": target.ID.String(),
+		},
 	})
 	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("service.Rollback: run container: %w", err)
+		if previous.ContainerID == "" {
+			_ = s.apps.UpdateStatus(context.WithoutCancel(ctx), app.ID, domain.AppStatusFailed)
+		}
+		s.log.Error("rollback: candidate failed to start", "app", app.Name, "target", target.ID, "err", err)
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: run candidate container: %w", err)
 	}
 
-	durationMs := int(time.Since(start).Milliseconds())
-	if err := s.deps.UpdateRunning(ctx, target.ID, info.ID, info.Port, target.ImageTag, durationMs); err != nil {
-		return domain.Deployment{}, fmt.Errorf("service.Rollback: mark target running: %w", err)
+	candidateStore, hasCandidateStore := s.deps.(store.DeploymentCandidateStore)
+	if hasCandidateStore {
+		if err := candidateStore.UpdateCandidate(ctx, target.ID, info.ID, info.Port); err != nil {
+			_ = s.cleanupCandidate(context.WithoutCancel(ctx), info.ID)
+			return domain.Deployment{}, fmt.Errorf("service.Rollback: persist candidate: %w", err)
+		}
 	}
-	if err := s.apps.UpdateStatus(ctx, app.ID, domain.AppStatusRunning); err != nil {
-		s.log.Warn("rollback: update app status", "err", err)
+	cleanupCandidate := func(cleanupCtx context.Context) {
+		if err := s.cleanupCandidate(cleanupCtx, info.ID); err != nil {
+			s.log.Warn("rollback: cleanup candidate", "app", app.Name, "target", target.ID, "container", info.ID, "err", err)
+		}
+		if hasCandidateStore {
+			if err := candidateStore.ClearCandidate(context.WithoutCancel(cleanupCtx), target.ID); err != nil {
+				s.log.Warn("rollback: clear candidate metadata", "target", target.ID, "err", err)
+			}
+		}
+	}
+	restorePrevious := func() {
+		restoreCtx := context.WithoutCancel(ctx)
+		if previous.ContainerID != "" {
+			if _, restoreErr := s.switchRoute(restoreCtx, app.Name, previous.Port); restoreErr != nil {
+				s.log.Error("rollback: restore previous route", "app", app.Name, "port", previous.Port, "err", restoreErr)
+			}
+			if s.customDomains != nil {
+				if syncErr := s.customDomains.SyncRoutes(restoreCtx, app.ID, previous.Port); syncErr != nil {
+					s.log.Warn("rollback: restore custom domain routes", "app", app.Name, "err", syncErr)
+				}
+			}
+			return
+		}
+		if err := s.caddy.RemoveRoute(restoreCtx, app.Name); err != nil {
+			s.log.Warn("rollback: remove candidate route", "app", app.Name, "err", err)
+		}
+		if s.customDomains != nil {
+			if err := s.customDomains.RemoveRoutes(restoreCtx, app.ID); err != nil {
+				s.log.Warn("rollback: remove candidate custom domain routes", "app", app.Name, "err", err)
+			}
+		}
+	}
+	if readiness, ok := s.docker.(ContainerReadiness); ok {
+		if err := readiness.WaitContainerReady(ctx, info.ID, info.Port, docker.ReadinessOptions{Timeout: s.readyTimeout}); err != nil {
+			cleanupCandidate(context.WithoutCancel(ctx))
+			if previous.ContainerID == "" {
+				_ = s.apps.UpdateStatus(context.WithoutCancel(ctx), app.ID, domain.AppStatusFailed)
+			}
+			return domain.Deployment{}, fmt.Errorf("service.Rollback: candidate readiness: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		cleanupCandidate(context.WithoutCancel(ctx))
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: candidate cancelled: %w", err)
 	}
 
-	publicURL, err := s.caddy.UpsertRoute(ctx, app.Name, info.Port)
+	publicURL, err := s.switchRoute(ctx, app.Name, info.Port)
 	if err != nil {
-		s.log.Error("rollback: caddy route", "err", err)
-	} else if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
-		s.log.Warn("rollback: update public url", "err", err)
+		cleanupCandidate(context.WithoutCancel(ctx))
+		if previous.ContainerID == "" {
+			_ = s.apps.UpdateStatus(context.WithoutCancel(ctx), app.ID, domain.AppStatusFailed)
+		}
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: switch route: %w", err)
 	}
 	if s.customDomains != nil {
 		if err := s.customDomains.SyncRoutes(ctx, app.ID, info.Port); err != nil {
-			s.log.Warn("rollback: custom domain routes", "err", err)
+			restorePrevious()
+			cleanupCandidate(context.WithoutCancel(ctx))
+			return domain.Deployment{}, fmt.Errorf("service.Rollback: sync custom domains: %w", err)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		restorePrevious()
+		cleanupCandidate(context.WithoutCancel(ctx))
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: publish cancelled: %w", err)
+	}
 
-	if err := s.rollbacks.Record(ctx, app.ID, fromID, target.ID, triggeredBy); err != nil {
+	durationMs := int(time.Since(start).Milliseconds())
+	if hasCandidateStore {
+		err = candidateStore.PromoteCandidate(ctx, target.ID, info.ID, info.Port, target.ImageTag, durationMs)
+	} else {
+		err = s.deps.UpdateRunning(ctx, target.ID, info.ID, info.Port, target.ImageTag, durationMs)
+	}
+	if err != nil {
+		restorePrevious()
+		cleanupCandidate(context.WithoutCancel(ctx))
+		return domain.Deployment{}, fmt.Errorf("service.Rollback: promote candidate: %w", err)
+	}
+
+	if err := s.apps.UpdateStatus(ctx, app.ID, domain.AppStatusRunning); err != nil {
+		s.log.Warn("rollback: update app status", "err", err)
+	}
+	if err := s.apps.UpdatePublicURL(ctx, app.ID, publicURL); err != nil {
+		s.log.Warn("rollback: update public url", "err", err)
+	}
+	if previous.ContainerID != "" && previous.ID != target.ID {
+		s.event(ctx, target.ID, "cleanup", "system", "Parando o container anterior após a troca")
+		if err := s.docker.StopContainer(ctx, previous.ContainerID); err != nil {
+			s.log.Warn("rollback: stop previous", "container", previous.ContainerID, "err", err)
+		}
+		if err := s.docker.RemoveContainer(ctx, previous.ContainerID); err != nil {
+			s.log.Warn("rollback: remove previous", "container", previous.ContainerID, "err", err)
+		}
+		if err := s.deps.UpdateStatus(ctx, previous.ID, domain.DeploymentStatusRolledBack); err != nil {
+			s.log.Warn("rollback: mark previous rolled_back", "err", err)
+		}
+	}
+	if err := s.rollbacks.Record(ctx, app.ID, previous.ID, target.ID, triggeredBy); err != nil {
 		s.log.Warn("rollback: history", "err", err)
 	}
 
@@ -709,7 +880,7 @@ func (s *DeploymentService) Rollback(ctx context.Context, appName string, target
 		return domain.Deployment{}, err
 	}
 	s.log.Info("rollback ok",
-		"app", app.Name, "from", fromID, "to", target.ID,
+		"app", app.Name, "from", previous.ID, "to", target.ID,
 		"container", info.ID, "port", info.Port,
 		"dur_ms", time.Since(start).Milliseconds(),
 	)

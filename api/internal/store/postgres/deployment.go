@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,6 +16,13 @@ import (
 type DeploymentStore struct {
 	q *sqlc.Queries
 }
+
+var (
+	_ store.DeploymentCancellationStore = (*DeploymentStore)(nil)
+	_ store.GitDeploymentStore          = (*DeploymentStore)(nil)
+	_ store.TriggeredGitDeploymentStore = (*DeploymentStore)(nil)
+	_ store.GitRetryDeploymentStore     = (*DeploymentStore)(nil)
+)
 
 func NewDeploymentStore(q *sqlc.Queries) *DeploymentStore {
 	return &DeploymentStore{q: q}

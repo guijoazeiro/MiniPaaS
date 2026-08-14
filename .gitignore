@@ -40,6 +40,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Local database backups
+backups/
+
 
 node_modules/
 

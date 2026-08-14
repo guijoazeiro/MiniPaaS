@@ -14,7 +14,9 @@ type customDomainTestStore struct {
 	item domain.CustomDomain
 }
 
-func (s *customDomainTestStore) Create(context.Context, uuid.UUID, string) (domain.CustomDomain, error) { return s.item, nil }
+func (s *customDomainTestStore) Create(context.Context, uuid.UUID, string) (domain.CustomDomain, error) {
+	return s.item, nil
+}
 func (s *customDomainTestStore) Get(context.Context, uuid.UUID) (domain.CustomDomain, error) {
 	if s.item.ID == uuid.Nil {
 		return domain.CustomDomain{}, domain.ErrCustomDomainNotFound
@@ -40,29 +42,59 @@ func (s *customDomainTestStore) Delete(context.Context, uuid.UUID) error { retur
 type customDomainTestApps struct{ app domain.App }
 
 func (s *customDomainTestApps) Create(context.Context, string) (domain.App, error) { return s.app, nil }
-func (s *customDomainTestApps) GetByName(context.Context, string) (domain.App, error) { return s.app, nil }
-func (s *customDomainTestApps) GetByID(context.Context, uuid.UUID) (domain.App, error) { return s.app, nil }
-func (s *customDomainTestApps) List(context.Context) ([]domain.App, error) { return []domain.App{s.app}, nil }
-func (s *customDomainTestApps) UpdateStatus(context.Context, uuid.UUID, domain.AppStatus) error { return nil }
+func (s *customDomainTestApps) GetByName(context.Context, string) (domain.App, error) {
+	return s.app, nil
+}
+func (s *customDomainTestApps) GetByID(context.Context, uuid.UUID) (domain.App, error) {
+	return s.app, nil
+}
+func (s *customDomainTestApps) List(context.Context) ([]domain.App, error) {
+	return []domain.App{s.app}, nil
+}
+func (s *customDomainTestApps) UpdateStatus(context.Context, uuid.UUID, domain.AppStatus) error {
+	return nil
+}
 func (s *customDomainTestApps) UpdatePublicURL(context.Context, uuid.UUID, string) error { return nil }
-func (s *customDomainTestApps) Delete(context.Context, uuid.UUID) error { return nil }
+func (s *customDomainTestApps) Delete(context.Context, uuid.UUID) error                  { return nil }
 
 type customDomainTestDeployments struct{ active domain.Deployment }
 
-func (s *customDomainTestDeployments) Create(context.Context, uuid.UUID, string) (domain.Deployment, error) { return s.active, nil }
-func (s *customDomainTestDeployments) GetByID(context.Context, uuid.UUID) (domain.Deployment, error) { return s.active, nil }
-func (s *customDomainTestDeployments) GetActive(context.Context, uuid.UUID) (domain.Deployment, error) { return s.active, nil }
-func (s *customDomainTestDeployments) ListRunning(context.Context) ([]domain.Deployment, error) { return []domain.Deployment{s.active}, nil }
-func (s *customDomainTestDeployments) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) { return []domain.Deployment{s.active}, nil }
-func (s *customDomainTestDeployments) ListAll(context.Context, string, string, int, int) ([]domain.DeploymentListItem, error) { return nil, nil }
-func (s *customDomainTestDeployments) CountAll(context.Context, string, string) (int64, error) { return 0, nil }
-func (s *customDomainTestDeployments) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) { return nil, nil }
-func (s *customDomainTestDeployments) UpdateRunning(context.Context, uuid.UUID, string, int, string, int) error { return nil }
-func (s *customDomainTestDeployments) UpdateStatus(context.Context, uuid.UUID, domain.DeploymentStatus) error { return nil }
+func (s *customDomainTestDeployments) Create(context.Context, uuid.UUID, string) (domain.Deployment, error) {
+	return s.active, nil
+}
+func (s *customDomainTestDeployments) GetByID(context.Context, uuid.UUID) (domain.Deployment, error) {
+	return s.active, nil
+}
+func (s *customDomainTestDeployments) GetActive(context.Context, uuid.UUID) (domain.Deployment, error) {
+	return s.active, nil
+}
+func (s *customDomainTestDeployments) ListRunning(context.Context) ([]domain.Deployment, error) {
+	return []domain.Deployment{s.active}, nil
+}
+func (s *customDomainTestDeployments) ListByApp(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
+	return []domain.Deployment{s.active}, nil
+}
+func (s *customDomainTestDeployments) ListAll(context.Context, string, string, int, int) ([]domain.DeploymentListItem, error) {
+	return nil, nil
+}
+func (s *customDomainTestDeployments) CountAll(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
+func (s *customDomainTestDeployments) ListForRetention(context.Context, uuid.UUID, int) ([]domain.Deployment, error) {
+	return nil, nil
+}
+func (s *customDomainTestDeployments) UpdateRunning(context.Context, uuid.UUID, string, int, string, int) error {
+	return nil
+}
+func (s *customDomainTestDeployments) UpdateStatus(context.Context, uuid.UUID, domain.DeploymentStatus) error {
+	return nil
+}
 
 type customDomainTestResolver struct{ addresses []string }
 
-func (r customDomainTestResolver) LookupHost(context.Context, string) ([]string, error) { return r.addresses, nil }
+func (r customDomainTestResolver) LookupHost(context.Context, string) ([]string, error) {
+	return r.addresses, nil
+}
 
 type customDomainTestRouter struct{ calls []string }
 
@@ -110,5 +142,15 @@ func TestNormalizeHostnameRejectsMiniPaaSSubdomains(t *testing.T) {
 	got, err := normalizeHostname(" API.Example.COM. ", "minipaas.local")
 	if err != nil || got != "api.example.com" {
 		t.Fatalf("normalized hostname = %q, err = %v", got, err)
+	}
+}
+
+func TestNormalizeHostnameConvertsInternationalizedDomain(t *testing.T) {
+	got, err := normalizeHostname("média.example.com", "minipaas.local")
+	if err != nil {
+		t.Fatalf("normalizeHostname() error = %v", err)
+	}
+	if got != "xn--mdia-bpa.example.com" {
+		t.Fatalf("normalized hostname = %q, want punycode form", got)
 	}
 }

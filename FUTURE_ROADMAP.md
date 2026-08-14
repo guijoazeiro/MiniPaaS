@@ -80,7 +80,7 @@ Make releases safe enough for continuously available applications.
 
 If the candidate fails, MiniPaaS keeps the previous deployment serving traffic and records the new deployment as failed.
 
-The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. HTTP health paths, startup grace periods, and resource limits remain follow-up configuration work.
+The implementation persists candidate container metadata, serializes the promotion portion per application, restores routes and removes orphan candidates after an API restart, and exposes `DEPLOY_READY_TIMEOUT` for the TCP readiness deadline. Optional global runtime caps are now available through `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT`; per-application limits, HTTP health paths, and startup grace periods remain follow-up configuration work.
 
 ### Application configuration
 
@@ -126,7 +126,7 @@ Phase 12.3 adds a shared Docker stats WebSocket per active container, automatic 
 These controls should be implemented alongside the phases above rather than postponed to a final security pass:
 
 - Allow only supported Git hosts and block repository URLs that resolve to loopback, link-local, or private infrastructure when appropriate, preventing SSRF.
-- Limit repository size, upload size, build duration, log size, and concurrent builds.
+- ✅ Limit repository size, upload size, build duration, and concurrent builds. Build-log retention remains a follow-up policy.
 - Use shallow clones and avoid fetching unnecessary Git history.
 - Never place repository credentials, environment variables, or build secrets in command output or persisted logs.
 - Encrypt stored credentials and support credential rotation/revocation.
@@ -134,8 +134,10 @@ These controls should be implemented alongside the phases above rather than post
 - Validate webhook signatures and protect against replay/duplicate events.
 - Run builds with constrained CPU, memory, network, and filesystem access where feasible.
 - Guarantee cleanup of temporary directories, failed containers, and unused images.
-- Record an audit trail for deploys, rollbacks, environment changes, domain changes, and authentication events.
-- Add database backup and restore documentation before treating the platform as production-ready.
+- ✅ Record an audit trail for mutating API requests, including deploys, rollbacks, environment changes, domain changes, and authentication events.
+- ✅ Add database backup and restore documentation before treating the platform as production-ready.
+
+Phase 13 now provides request correlation, persisted audit events for mutating API requests, sensitive-endpoint rate limiting, bounded Docker builds, optional container resource caps, readiness probes, startup reconciliation of labeled orphan containers, and documented PostgreSQL backup/restore procedures. Distributed rate-limit state and per-application resource settings remain follow-up work for a multi-tenant production release.
 
 ## Later opportunities
 
@@ -165,3 +167,4 @@ The strongest next sequence for product value and portfolio depth is:
 4. Persistent and streamed build logs.
 5. Zero-downtime route switching with readiness checks.
 6. Custom domains and lightweight metrics.
+7. Backend hardening: limits, correlation, readiness, reconciliation, and recovery drills.

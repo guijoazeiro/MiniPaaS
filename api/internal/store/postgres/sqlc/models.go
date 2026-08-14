@@ -32,6 +32,17 @@ type AppGitSource struct {
 	AutoDeploy           bool               `json:"auto_deploy"`
 }
 
+type AuditEvent struct {
+	ID         int64              `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	Action     string             `json:"action"`
+	Method     string             `json:"method"`
+	Path       string             `json:"path"`
+	StatusCode int32              `json:"status_code"`
+	RequestID  string             `json:"request_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type CustomDomain struct {
 	ID         pgtype.UUID        `json:"id"`
 	AppID      pgtype.UUID        `json:"app_id"`
