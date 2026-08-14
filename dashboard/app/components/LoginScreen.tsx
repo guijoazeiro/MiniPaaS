@@ -8,12 +8,13 @@ type Props = {
   onThemeChange: () => void;
   onBack: () => void;
   onLogin: (event: FormEvent<HTMLFormElement>) => void;
+  onRegister: () => void;
   error: string;
   apiIssue: string;
   busy: boolean;
 };
 
-export function LoginScreen({ theme, onThemeChange, onBack, onLogin, error, apiIssue, busy }: Props) {
+export function LoginScreen({ theme, onThemeChange, onBack, onLogin, onRegister, error, apiIssue, busy }: Props) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -37,6 +38,7 @@ export function LoginScreen({ theme, onThemeChange, onBack, onLogin, error, apiI
           {error && <p className="feedback error">{error}</p>}
           <button className="button primary" disabled={busy}>{busy ? "Entrando…" : "Entrar no painel"}</button>
         </form>
+        <p className="auth-switch">Ainda não tem uma conta? <button type="button" onClick={onRegister}>Criar conta</button></p>
       </section>
       <button className="theme-button login-theme" onClick={onThemeChange} aria-label="Alternar tema">{theme === "dark" ? "☼ Claro" : "◐ Escuro"}</button>
     </main>
