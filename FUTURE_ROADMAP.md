@@ -126,7 +126,7 @@ Phase 12.3 adds a shared Docker stats WebSocket per active container, automatic 
 These controls should be implemented alongside the phases above rather than postponed to a final security pass:
 
 - Allow only supported Git hosts and block repository URLs that resolve to loopback, link-local, or private infrastructure when appropriate, preventing SSRF.
-- Limit repository size, upload size, build duration, log size, and concurrent builds.
+- ✅ Limit repository size, upload size, build duration, and concurrent builds. Build-log retention remains a follow-up policy.
 - Use shallow clones and avoid fetching unnecessary Git history.
 - Never place repository credentials, environment variables, or build secrets in command output or persisted logs.
 - Encrypt stored credentials and support credential rotation/revocation.
@@ -134,10 +134,10 @@ These controls should be implemented alongside the phases above rather than post
 - Validate webhook signatures and protect against replay/duplicate events.
 - Run builds with constrained CPU, memory, network, and filesystem access where feasible.
 - Guarantee cleanup of temporary directories, failed containers, and unused images.
-- Record an audit trail for deploys, rollbacks, environment changes, domain changes, and authentication events.
+- ✅ Record an audit trail for mutating API requests, including deploys, rollbacks, environment changes, domain changes, and authentication events.
 - ✅ Add database backup and restore documentation before treating the platform as production-ready.
 
-Phase 13 now provides request correlation, sensitive-endpoint rate limiting, optional container resource caps, readiness probes, startup reconciliation of labeled orphan containers, and documented PostgreSQL backup/restore procedures. Audit-log persistence, distributed rate-limit state, and per-application resource settings remain follow-up work for a multi-tenant production release.
+Phase 13 now provides request correlation, persisted audit events for mutating API requests, sensitive-endpoint rate limiting, bounded Docker builds, optional container resource caps, readiness probes, startup reconciliation of labeled orphan containers, and documented PostgreSQL backup/restore procedures. Distributed rate-limit state and per-application resource settings remain follow-up work for a multi-tenant production release.
 
 ## Later opportunities
 

@@ -26,7 +26,7 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | 12.1 | Custom domains | ✅ validated |
 | 12.2 | Operational metrics | ✅ validated |
 | 12.3 | Real-time metrics stream | ✅ validated |
-| 13 | Backend hardening and production readiness | in progress |
+| 13 | Backend hardening and production readiness | ✅ done |
 
 ## Stack
 
@@ -710,7 +710,9 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `DEPLOY_READY_TIMEOUT` | no | `60s` | Maximum time a new candidate container may take to accept TCP connections before the rollout is failed and the current release remains active. |
 | `MAX_DEPLOY_SIZE_MB` | no | `100` | Maximum accepted deployment source upload size in MiB. Requests over the limit receive HTTP 413. |
 | `MAX_REPOSITORY_SIZE_MB` | no | `250` | Maximum unpacked build-context size accepted from a Git repository. |
-| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. The Docker build keeps its existing lifecycle. |
+| `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. |
+| `BUILD_TIMEOUT` | no | `15m` | Maximum time allowed for one Docker image build before the deployment is failed. |
+| `MAX_CONCURRENT_BUILDS` | no | `2` | Maximum number of Docker image builds running in parallel. Additional deployments remain queued until a slot is available. |
 | `GITHUB_APP_ID` | conditional | — | Numeric App ID used for private repository access. Must be set with the slug and private-key path. |
 | `GITHUB_APP_SLUG` | conditional | — | Slug from the GitHub App settings page. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | conditional | — | Absolute path to the GitHub App private-key PEM. Keep this file outside the repository. |
@@ -731,7 +733,7 @@ Authentication (`/auth/login` and `/auth/web-login`) and the GitHub webhook endp
 
 Every API response includes an `X-Request-ID` UUID. A valid incoming UUID is preserved for correlation; malformed values are replaced. The same ID is included in the structured HTTP request log entry.
 
-When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited; per-application limits and build-time isolation are still future work.
+When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited. Docker builds are bounded by `BUILD_TIMEOUT` and share the `MAX_CONCURRENT_BUILDS` queue.
 
 The API also reconciles labeled MiniPaaS containers at startup. It preserves every container referenced by a running deployment or candidate rollout and removes only stale containers with the `com.minipaas.managed=true` label. Containers created outside MiniPaaS are never touched.
 
@@ -753,6 +755,10 @@ docker compose exec -T postgres pg_restore -U postgres -d minipaas_restore --cle
 ```
 
 Verify the restore by running the migrations/status checks and the PostgreSQL integration tests against the restored DSN. A backup is only considered usable after a restore has been tested; do not overwrite the live database during a first recovery exercise.
+
+### Audit trail
+
+Every mutating HTTP request (`POST`, `PUT`, `PATCH`, or `DELETE`) is recorded in PostgreSQL after it completes. The record contains the authenticated user when available, route, status code, request ID, and timestamp; request bodies are never persisted, so passwords, environment values, and source contents are excluded. Authenticated operators can inspect recent entries with `GET /audit?limit=50&offset=0`.
 
 ## Development
 
