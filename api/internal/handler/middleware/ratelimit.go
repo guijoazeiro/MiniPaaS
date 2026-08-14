@@ -22,6 +22,8 @@ type RateLimiter struct {
 	clients map[string]rateLimitState
 }
 
+const maxTrackedClients = 1024
+
 type rateLimitState struct {
 	started time.Time
 	count   int
@@ -66,9 +68,10 @@ func (l *RateLimiter) Allow(key string) (allowed bool, retryAfter time.Duration)
 	}
 
 	l.clients[key] = rateLimitState{started: now, count: 1}
-	// Bound state growth when a process receives many distinct clients. Prefer
-	// removing expired windows, then evict the oldest active entries.
-	for len(l.clients) > 1024 {
+	// Bound state growth when a process receives many distinct clients. A
+	// single pass removes expired windows and finds the oldest active entry;
+	// any remaining excess entries are evicted without rescanning the map.
+	if len(l.clients) > maxTrackedClients {
 		oldestKey := ""
 		oldest := now
 		for client, state := range l.clients {
@@ -81,10 +84,15 @@ func (l *RateLimiter) Allow(key string) (allowed bool, retryAfter time.Duration)
 				oldest = state.started
 			}
 		}
-		if oldestKey == "" {
-			break
+		if len(l.clients) > maxTrackedClients && oldestKey != "" {
+			delete(l.clients, oldestKey)
 		}
-		delete(l.clients, oldestKey)
+		for len(l.clients) > maxTrackedClients {
+			for client := range l.clients {
+				delete(l.clients, client)
+				break
+			}
+		}
 	}
 	return true, 0
 }

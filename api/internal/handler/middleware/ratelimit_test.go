@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,5 +80,24 @@ func TestRateLimiterIsSafeUnderConcurrentRequests(t *testing.T) {
 	wg.Wait()
 	if got := allowed.Load(); got != 5 {
 		t.Fatalf("allowed concurrent requests = %d, want 5", got)
+	}
+}
+
+func TestRateLimiterEvictionKeepsStateBounded(t *testing.T) {
+	limiter := NewRateLimiter(1, time.Minute)
+	limiter.now = func() time.Time { return time.Unix(1000, 0) }
+	limiter.mu.Lock()
+	for i := 0; i < maxTrackedClients+500; i++ {
+		limiter.clients["client-"+strconv.Itoa(i)] = rateLimitState{started: time.Unix(999, 0), count: 1}
+	}
+	limiter.mu.Unlock()
+
+	if ok, _ := limiter.Allow("new-client"); !ok {
+		t.Fatal("new client should be allowed")
+	}
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	if len(limiter.clients) > maxTrackedClients {
+		t.Fatalf("tracked clients = %d, want at most %d", len(limiter.clients), maxTrackedClients)
 	}
 }
