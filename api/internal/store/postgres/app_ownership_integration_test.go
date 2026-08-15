@@ -67,3 +67,79 @@ func TestAppStoreScopesApplicationsToAuthenticatedUser(t *testing.T) {
 		t.Fatalf("cross-owner lookup error = %v, want app not found", err)
 	}
 }
+
+func TestGitHubInstallationStoreScopesInstallationsToAuthenticatedUser(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL is required for integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	queries := sqlc.New(pool)
+	users := NewUserStore(queries)
+	installations := NewGitHubInstallationStore(queries)
+	hash, err := bcrypt.GenerateFromPassword([]byte("ownership-test-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userA, err := users.Create(ctx, "github-owner-a-"+uuid.NewString()[:8], string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	userB, err := users.Create(ctx, "github-owner-b-"+uuid.NewString()[:8], string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	installationID := time.Now().UnixNano()
+	installation := domain.GitHubInstallation{
+		InstallationID:      installationID,
+		AccountLogin:        "github-owner-a",
+		AccountType:         "User",
+		RepositorySelection: "selected",
+	}
+	ownerCtxA := authctx.WithUserID(ctx, userA.ID)
+	ownerCtxB := authctx.WithUserID(ctx, userB.ID)
+	if _, err := installations.Upsert(ownerCtxA, installation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM github_installations WHERE installation_id = $1", installationID)
+	})
+	if _, err := installations.Get(ownerCtxA, installationID); err != nil {
+		t.Fatalf("owner lookup error = %v", err)
+	}
+	if _, err := installations.Get(ownerCtxB, installationID); !errors.Is(err, domain.ErrGitHubInstallationNotFound) {
+		t.Fatalf("cross-owner lookup error = %v, want installation not found", err)
+	}
+	listA, err := installations.List(ownerCtxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundA := false
+	for _, item := range listA {
+		if item.InstallationID == installationID {
+			foundA = true
+			break
+		}
+	}
+	if !foundA {
+		t.Fatalf("owner list does not contain installation %d", installationID)
+	}
+	listB, err := installations.List(ownerCtxB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listB {
+		if item.InstallationID == installationID {
+			t.Fatalf("cross-owner list contains installation %d", installationID)
+		}
+	}
+	if _, err := installations.Upsert(ownerCtxB, installation); !errors.Is(err, domain.ErrGitHubInstallationOwned) {
+		t.Fatalf("cross-owner upsert error = %v, want installation owned", err)
+	}
+}

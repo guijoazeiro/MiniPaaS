@@ -106,6 +106,7 @@ type GithubInstallation struct {
 	RepositorySelection string             `json:"repository_selection"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	OwnerUserID         pgtype.UUID        `json:"owner_user_id"`
 }
 
 type GithubWebhookDelivery struct {

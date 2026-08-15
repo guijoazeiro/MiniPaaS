@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
 )
@@ -14,8 +16,8 @@ type GitHubAppClient interface {
 }
 
 type GitHubStateSigner interface {
-	Sign(appName string) (string, error)
-	Verify(raw string) (string, error)
+	Sign(appName string, userID uuid.UUID) (string, error)
+	Verify(raw string) (string, uuid.UUID, error)
 }
 
 type GitHubAppService struct {
@@ -40,7 +42,11 @@ func (s *GitHubAppService) InstallURL(ctx context.Context, appName string) (stri
 	if _, err := s.apps.GetByName(ctx, appName); err != nil {
 		return "", err
 	}
-	state, err := s.states.Sign(appName)
+	userID, ok := authctx.UserID(ctx)
+	if !ok {
+		return "", domain.ErrUnauthorized
+	}
+	state, err := s.states.Sign(appName, userID)
 	if err != nil {
 		return "", err
 	}
@@ -51,9 +57,13 @@ func (s *GitHubAppService) Connect(ctx context.Context, installationID int64, st
 	if !s.Enabled() || installationID <= 0 {
 		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
 	}
-	appName, err := s.states.Verify(state)
+	appName, stateUserID, err := s.states.Verify(state)
 	if err != nil {
 		return "", domain.GitHubInstallation{}, err
+	}
+	userID, ok := authctx.UserID(ctx)
+	if !ok || userID != stateUserID {
+		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
 	}
 	if _, err := s.apps.GetByName(ctx, appName); err != nil {
 		return "", domain.GitHubInstallation{}, err

@@ -36,7 +36,7 @@ Allow an application to connect to a GitHub repository and start a deployment wi
 - Prefer a GitHub App with short-lived installation tokens for private access.
 - If a personal access token is supported initially, encrypt it at rest and never return it through the API.
 
-Phase 9.1 delivered public repositories. Phase 9.2 adds private repositories through a GitHub App, short-lived installation tokens, repository selection in the dashboard, and equivalent CLI configuration for existing installations.
+Phase 9.1 delivered public repositories. Phase 9.2 adds private repositories through a GitHub App, short-lived installation tokens, repository selection in the dashboard, equivalent CLI configuration for existing installations, and per-user ownership for GitHub App installations.
 
 ## Phase 10 — Webhooks, auto-deploy, and build visibility
 
@@ -146,6 +146,7 @@ This phase adds the minimum account and multi-user foundation needed by the dash
 - public account registration with username/password validation and rate limiting;
 - authenticated profile lookup and username/password updates;
 - ownership on applications, with owner-scoped app, deployment, log, environment, domain, metrics, and audit queries;
+- ownership on GitHub App installations, with callback state bound to the MiniPaaS user and repository access filtered accordingly;
 - migration `015_add_app_owners` to assign existing applications to the first configured user while preserving internal/system access for reconciliation jobs;
 - destructive application deletion through the API, dashboard danger zone, and `minip apps delete <name> --yes` CLI command;
 - runtime-first deletion: Caddy routes and containers are cleaned before the database row is removed, and cleanup errors preserve the row for recovery;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store/postgres/sqlc"
 	"github.com/jackc/pgx/v5"
@@ -19,20 +20,33 @@ func NewGitHubInstallationStore(q *sqlc.Queries) *GitHubInstallationStore {
 }
 
 func (s *GitHubInstallationStore) Upsert(ctx context.Context, installation domain.GitHubInstallation) (domain.GitHubInstallation, error) {
-	row, err := s.q.UpsertGitHubInstallation(ctx, sqlc.UpsertGitHubInstallationParams{
+	params := sqlc.UpsertGitHubInstallationParams{
 		InstallationID:      installation.InstallationID,
 		AccountLogin:        installation.AccountLogin,
 		AccountType:         installation.AccountType,
 		RepositorySelection: installation.RepositorySelection,
-	})
+	}
+	if ownerID, ok := authctx.UserID(ctx); ok {
+		params.OwnerUserID = uuidToPG(ownerID)
+	}
+	row, err := s.q.UpsertGitHubInstallation(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.GitHubInstallation{}, domain.ErrGitHubInstallationOwned
+		}
 		return domain.GitHubInstallation{}, fmt.Errorf("store.UpsertGitHubInstallation: %w", err)
 	}
 	return toDomainGitHubInstallation(row), nil
 }
 
 func (s *GitHubInstallationStore) Get(ctx context.Context, installationID int64) (domain.GitHubInstallation, error) {
-	row, err := s.q.GetGitHubInstallation(ctx, installationID)
+	var row sqlc.GithubInstallation
+	var err error
+	if ownerID, ok := authctx.UserID(ctx); ok {
+		row, err = s.q.GetGitHubInstallationForUser(ctx, sqlc.GetGitHubInstallationForUserParams{InstallationID: installationID, OwnerUserID: uuidToPG(ownerID)})
+	} else {
+		row, err = s.q.GetGitHubInstallation(ctx, installationID)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.GitHubInstallation{}, domain.ErrGitHubInstallationNotFound
@@ -43,7 +57,13 @@ func (s *GitHubInstallationStore) Get(ctx context.Context, installationID int64)
 }
 
 func (s *GitHubInstallationStore) List(ctx context.Context) ([]domain.GitHubInstallation, error) {
-	rows, err := s.q.ListGitHubInstallations(ctx)
+	var rows []sqlc.GithubInstallation
+	var err error
+	if ownerID, ok := authctx.UserID(ctx); ok {
+		rows, err = s.q.ListGitHubInstallationsForUser(ctx, uuidToPG(ownerID))
+	} else {
+		rows, err = s.q.ListGitHubInstallations(ctx)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("store.ListGitHubInstallations: %w", err)
 	}
