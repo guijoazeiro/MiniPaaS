@@ -302,6 +302,9 @@ POST   /auth/register                 { username, password } → User
 GET    /me                            → User (without password hash)
 PATCH  /me                            { username } → User
 PATCH  /me/password                   { current_password, new_password } → 204
+POST   /me/tokens                     { name, scopes?, expires_at? } → token (raw secret returned once; session only)
+GET    /me/tokens                     → []APIToken (metadata only; session only)
+DELETE /me/tokens/:id                 → 204 (session only)
 
 POST   /apps                          { name } → App
 GET    /apps                          → []App
@@ -344,6 +347,81 @@ GET    /apps/:name/deployments/:id/logs?after=0&limit=500 (persisted build event
 Registration accepts usernames with 3–64 characters (`A–Z`, `a–z`, digits, `_`, `-`, or `.`) and passwords with at least 8 characters. The dashboard sends the user to login after a successful registration; changing the username or password renews the browser session cookie.
 
 Applications created through an authenticated request are owned by that user. Application lists, project details, deployments, logs, environment variables, custom domains, metrics, and audit events are scoped to the authenticated owner. Existing applications are assigned to the first configured user by migration `015`; internal jobs and legacy system contexts can still access unowned records for reconciliation and webhook processing.
+
+### API tokens for automation and CI/CD
+
+The API also accepts personal, opaque automation tokens with the `mpat_` prefix. A token contains at least 256 bits of cryptographically secure randomness. MiniPaaS stores only its SHA-256 hash and a short display prefix; the raw secret is returned exactly once when the token is created and cannot be recovered later.
+
+Token management is intentionally session-only. Use the dashboard at **Conta → API tokens** or the following endpoints with the normal JWT/session cookie:
+
+```
+POST   /me/tokens       { name, scopes?, expires_at? } → token metadata + raw token (one time)
+GET    /me/tokens       → token metadata (never the raw token)
+DELETE /me/tokens/:id   → 204 (revoke immediately)
+```
+
+The available scopes are:
+
+- `read` — read projects, deployments, logs, metrics, Git sources, environment-key names, domains, audit events, and GitHub installation/repository metadata;
+- `deploy` — upload or trigger deployments, retry/cancel deployments, and roll back;
+- `manage` — create, stop, and delete applications, configure Git sources, environment values, and custom domains.
+
+Scopes are explicit and deny-by-default for API tokens. A token is always restricted to the owning MiniPaaS user's resources and cannot grant more access than that user has. Profile/credential changes, API-token management, and GitHub App installation/authorization remain session-only operations.
+
+For CLI and CI/CD use, set `MINIPAAS_TOKEN`. It takes precedence over the token saved by `minip login` in `config.json`, and a value read from the environment is never written back automatically:
+
+```powershell
+$env:MINIPAAS_HOST = "http://localhost:8080"
+$env:MINIPAAS_TOKEN = "mpat_..."
+.\minip.exe apps list
+.\minip.exe deploy --git --app hello --wait
+```
+
+Create and revoke tokens from the CLI while authenticated with an existing session:
+
+```powershell
+.\minip.exe tokens create ci-deploy --scope read --scope deploy --expires-at 2027-01-01T00:00:00Z
+.\minip.exe tokens list
+.\minip.exe tokens revoke <token-id> --yes
+```
+
+The `tokens create` output contains a warning that the secret is shown once. Store it in a password manager or the CI/CD secret store; do not paste it into source control, issue text, build logs, or command-line arguments that may be retained by a runner.
+
+GitHub Actions example for an application already connected to its GitHub repository in MiniPaaS:
+
+```yaml
+name: MiniPaaS deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MINIPAAS_HOST: ${{ secrets.MINIPAAS_HOST }}
+      MINIPAAS_TOKEN: ${{ secrets.MINIPAAS_TOKEN }}
+      MINIPAAS_APP: hello
+    steps:
+      - name: Trigger deployment
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${MINIPAAS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            "${MINIPAAS_HOST}/apps/${MINIPAAS_APP}/deployments/git"
+```
+
+The token used by this workflow needs at least `deploy`; the connected GitHub source and branch determine what is cloned. A generic CI/CD runner can use the same bearer header, for example to list deployments with `read`:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --header "Authorization: Bearer ${MINIPAAS_TOKEN}" \
+  "${MINIPAAS_HOST}/apps/${MINIPAAS_APP}/deployments"
+```
+
+Never include the token in `echo`/debug output. Revoking it invalidates subsequent requests immediately; expiration is checked on every authentication attempt.
 
 Deleting an application is intentionally destructive. `DELETE /apps/:name` removes its Caddy routes and runtime before deleting the database row; if runtime cleanup fails, the database row is preserved so the orphan can be recovered safely. The dashboard exposes this action in the project's **Zona de perigo** after requiring the exact application name.
 
@@ -409,9 +487,12 @@ minip logs <app> -f                    # follow until Ctrl+C or the container ex
 minip logs <app> --tail all -f         # backfill everything, then follow
 minip rollback <app>                   # interactive picker of eligible deployments
 minip rollback <app> --to <id>         # skip the picker
+minip tokens create <name>             # create; raw secret is printed once
+minip tokens list                       # metadata only: prefix, scopes, expiry, usage, status
+minip tokens revoke <id> --yes          # revoke immediately
 ```
 
-Host resolution order: `--host` flag → `MINIPAAS_HOST` env → saved config → `http://localhost:8080`.
+Host resolution order: `--host` flag → `MINIPAAS_HOST` env → saved config → `http://localhost:8080`. Authentication token resolution is `MINIPAAS_TOKEN` env → token saved by `minip login` in `config.json`; the environment value is never persisted automatically.
 
 ### Public GitHub deployment contract
 
