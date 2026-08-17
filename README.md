@@ -4,31 +4,6 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 
 > Portfolio project. Built to exercise production-grade backend patterns: Docker orchestration, dynamic reverse proxy management, encrypted secrets, WebSocket streaming, and a CLI-first API validated before any UI is written.
 
-## Status
-
-| Phase | Focus | State |
-|---|---|---|
-| 0 | Foundation (API skeleton, migrations, sqlc, Postgres) | ✅ done |
-| 1 | Docker orchestration + deploy via CLI | ✅ done |
-| 2 | Dynamic reverse proxy (Caddy) + HTTPS | ✅ done |
-| 3 | Auth (JWT) + encrypted env vars (AES-256-GCM) | ✅ done |
-| 4 | WebSocket log streaming | ✅ done |
-| 5 | Rollback + image retention | ✅ done |
-| 6 | Health checks | ✅ done |
-| 7 | Dashboard (Next.js) | ✅ done |
-| 8 | Polish, CI, release | ✅ done |
-| 9.1 | Deploy from public GitHub repositories | ✅ done |
-| 9.1.1 | Dashboard navigation and operational UX | 🚧 implemented, awaiting manual validation |
-| 10.1 | Signed GitHub webhooks and auto-deploy | ✅ done |
-| 10.2 | Persistent build logs | ✅ done |
-| 10.3 | Retry and cancellation | ✅ done |
-| 11 | Zero-downtime deployments | ✅ validated |
-| 12.1 | Custom domains | ✅ validated |
-| 12.2 | Operational metrics | ✅ validated |
-| 12.3 | Real-time metrics stream | ✅ validated |
-| 13 | Backend hardening and production readiness | ✅ done |
-| 14.1 | Accounts, app ownership, and safe deletion | ✅ implemented, awaiting manual validation |
-
 ## Stack
 
 | Layer | Choice | Why |
@@ -97,6 +72,7 @@ caddy run --config Caddyfile
 ```
 
 The `Caddyfile` only enables the Admin API on `localhost:2019`; every route is added at runtime by the API.
+On startup, the API checks that Caddy's HTTP app and `srv0` server exist. If Caddy was started with an empty configuration, the API bootstraps them before publishing the first application route.
 
 ### 3. Generate sqlc code and run migrations
 
@@ -393,13 +369,15 @@ A stopped deployment can be started again from the dashboard with **Reativar**, 
 After login, the dashboard opens the project directory instead of selecting the most recent application automatically.
 
 - `/dashboard/projects` lists every project and its current state.
+- Project status is revalidated automatically every five seconds without a full page reload. Use **Atualizar** in the project directory header for an immediate refresh; the current route, scroll position, and selection are preserved.
 - `/dashboard/projects/:name` contains overview, deployment history, logs, and configuration tabs.
 - `/dashboard/deployments` lists deployments from every project with project/status filters and pagination.
 - `/dashboard/logs` provides a dedicated live console with a project selector. Scrolling up pauses automatic following; **Ir para o final** resumes it.
 - `/dashboard/metrics` provides a project selector and live Docker-style charts for CPU, memory, network, and disk. The page keeps the latest 120 samples in browser memory and reconnects automatically when the WebSocket is interrupted.
+- `/dashboard/account` shows the authenticated user's profile, credential controls, and GitHub App installations. A user can connect another GitHub account or organization without sharing installations with other MiniPaaS users.
 - The project **Configurações** tab manages custom domains and encrypted environment variables.
 
-Theme and logout controls live in the top navigation. The dark theme uses a near-black base and translucent blur across navigation and operational surfaces. Very low-opacity, solid ambient forms are restricted to the page background so the glass remains perceptible; buttons, text, cards, and controls do not use decorative gradients.
+Theme and logout controls live in the top navigation. The interface uses a terminal-green identity in both themes. The dark theme uses a near-black base and translucent blur across navigation and operational surfaces. Toast notifications appear in a fixed glass viewport so they do not move page content; success messages dismiss automatically and errors remain until closed. Very low-opacity, solid ambient forms are restricted to the page background so the glass remains perceptible; buttons, text, cards, and controls do not use decorative gradients.
 
 ## CLI
 
@@ -456,7 +434,7 @@ Example for a monorepo whose application lives in `services/api`:
 
 ### Private repositories with a GitHub App
 
-Phase 9.2 supports private repositories through an instance-owned GitHub App. Each MiniPaaS user installs that same App in their own GitHub account or organization; MiniPaaS stores the installation owner and exposes only that user's installations. It requests a repository-scoped installation token when listing or cloning and never persists or returns that token.
+Phase 9.2 supports private repositories through an instance-owned GitHub App. Each MiniPaaS user can connect the App from **Conta → Contas do GitHub** or from the first-access onboarding prompt, then select the authorized installation in a project. MiniPaaS stores the installation owner and exposes only that user's installations. It requests a repository-scoped installation token when listing or cloning and never persists or returns that token.
 
 Create a GitHub App with:
 
@@ -465,7 +443,7 @@ Create a GitHub App with:
 - For auto-deploy, enable the webhook, subscribe only to **Push**, and use `<PUBLIC_API_URL>/integrations/github/webhook` as its URL.
 - Installation limited to the accounts and repositories that this MiniPaaS instance may deploy.
 
-Generate a private key for the App, store the PEM outside the repository, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY_PATH`. Restart the API, open a project's **Configurações → GitHub → GitHub App**, install/authorize the App, and select the repository.
+Generate a private key for the App, store the PEM outside the repository, and set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY_PATH`. Restart the API, open **Conta → Contas do GitHub** (or a project's **Configurações → GitHub → GitHub App**), install/authorize the App, and select the repository. If multiple GitHub accounts or organizations must install the same App, change the GitHub App visibility to public; a private App can only be installed by its owning account or organization.
 
 The CLI can reuse an installation created through the dashboard:
 
@@ -476,7 +454,7 @@ The CLI can reuse an installation created through the dashboard:
 .\minip.exe deploy --git --app hello --wait
 ```
 
-The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value bound to both the application and the MiniPaaS user. This Phase 9.2 flow assumes the GitHub App is private and controlled by the same administrator as the self-hosted MiniPaaS instance; GitHub account access is granted separately when each user installs the App.
+The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value bound to the target (account or application) and the MiniPaaS user. Installation ownership is enforced in PostgreSQL, so the same GitHub installation cannot be silently claimed by another MiniPaaS user.
 
 ### Signed push auto-deploy
 

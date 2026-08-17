@@ -54,14 +54,21 @@ func (c *Client) EnsureBase(ctx context.Context) error {
 		return nil
 	}
 
-	cfg := map[string]any{
-		serverName: map[string]any{
-			"listen":          []string{":80", ":443"},
-			"routes":          []any{},
-			"automatic_https": map[string]any{"disable_redirects": false},
-		},
+	server := map[string]any{
+		"listen":          []string{":80", ":443"},
+		"routes":          []any{},
+		"automatic_https": map[string]any{"disable_redirects": false},
 	}
-	return c.put(ctx, "/config/apps/http/servers", cfg, "EnsureBase")
+
+	// Caddy cannot traverse /config/apps/http/servers when the HTTP app has
+	// not been initialized yet. Bootstrap the app first, then subsequent
+	// calls can address an individual server without replacing other servers.
+	if resp.StatusCode == http.StatusBadRequest && bytes.Contains(bytes.ToLower(body), []byte("invalid traversal path at: config/apps/http")) {
+		return c.put(ctx, "/config/apps/http", map[string]any{
+			"servers": map[string]any{serverName: server},
+		}, "EnsureBase")
+	}
+	return c.put(ctx, "/config/apps/http/servers/"+serverName, server, "EnsureBase")
 }
 
 func (c *Client) UpsertRoute(ctx context.Context, appName string, port int) (string, error) {
