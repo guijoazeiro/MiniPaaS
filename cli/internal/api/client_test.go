@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +69,61 @@ func TestGitSourceAndDeployRequests(t *testing.T) {
 		if requests[i] != want[i] {
 			t.Fatalf("requests[%d] = %q, want %q", i, requests[i], want[i])
 		}
+	}
+}
+
+func TestAPITokenRequests(t *testing.T) {
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if got := r.Header.Get("Authorization"); got != "Bearer env-token" {
+			t.Errorf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/me/tokens":
+			var body struct {
+				Name      string   `json:"name"`
+				Scopes    []string `json:"scopes"`
+				ExpiresAt string   `json:"expires_at"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Name != "ci" || strings.Join(body.Scopes, ",") != "read,deploy" || body.ExpiresAt != "2030-01-01T00:00:00Z" {
+				t.Fatalf("create body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(APITokenCreated{APIToken: APIToken{ID: "token-id", Name: "ci", Scopes: body.Scopes}, Token: "mpat_secret"})
+		case r.Method == http.MethodGet && r.URL.Path == "/me/tokens":
+			_ = json.NewEncoder(w).Encode([]APIToken{{ID: "token-id", Name: "ci", Scopes: []string{"read", "deploy"}}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/me/tokens/token-id":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "env-token")
+	created, err := client.CreateAPIToken("ci", []string{"read", "deploy"}, "2030-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Token != "mpat_secret" {
+		t.Fatalf("created token = %q", created.Token)
+	}
+	listed, err := client.ListAPITokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != "token-id" {
+		t.Fatalf("listed tokens = %+v", listed)
+	}
+	if err := client.RevokeAPIToken("token-id"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"POST /me/tokens", "GET /me/tokens", "DELETE /me/tokens/token-id"}
+	if strings.Join(requests, "|") != strings.Join(want, "|") {
+		t.Fatalf("requests = %v, want %v", requests, want)
 	}
 }

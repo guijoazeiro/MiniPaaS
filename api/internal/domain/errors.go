@@ -40,4 +40,8 @@ var (
 	ErrCustomDomainInvalid           = errors.New("custom domain is invalid")
 	ErrCustomDomainDNSNotConfigured  = errors.New("custom domain DNS is not configured for this MiniPaaS instance")
 	ErrCustomDomainNotVerified       = errors.New("custom domain has not been verified")
+	ErrAPITokenNotFound              = errors.New("API token not found")
+	ErrAPITokenNameInvalid           = errors.New("API token name is invalid")
+	ErrAPITokenScopeInvalid          = errors.New("API token scope is invalid")
+	ErrAPITokenExpiryInvalid         = errors.New("API token expiry is invalid")
 )

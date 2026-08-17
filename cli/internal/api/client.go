@@ -26,6 +26,8 @@ func New(base, token string) *Client {
 
 func (c *Client) Host() string { return c.base }
 
+func (c *Client) Token() string { return c.token }
+
 type App struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
@@ -89,6 +91,24 @@ type GitHubRepository struct {
 	FullName      string `json:"full_name"`
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
+}
+
+// APIToken is the metadata returned for a personal automation token. The raw
+// secret is intentionally absent: the API returns it only during creation.
+type APIToken struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	TokenPrefix string   `json:"token_prefix"`
+	Scopes      []string `json:"scopes"`
+	ExpiresAt   *string  `json:"expires_at,omitempty"`
+	RevokedAt   *string  `json:"revoked_at,omitempty"`
+	LastUsedAt  *string  `json:"last_used_at,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+}
+
+type APITokenCreated struct {
+	APIToken
+	Token string `json:"token"`
 }
 
 func (c *Client) ListDeployments(app string) ([]Deployment, error) {
@@ -249,13 +269,17 @@ func (c *Client) GetDeployment(app, id string) (*Deployment, error) {
 
 func (c *Client) RetryDeployment(app, id string) (*Deployment, error) {
 	var out Deployment
-	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/retry", nil, "", &out); err != nil { return nil, err }
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/retry", nil, "", &out); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }
 
 func (c *Client) CancelDeployment(app, id string) (*Deployment, error) {
 	var out Deployment
-	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/cancel", nil, "", &out); err != nil { return nil, err }
+	if err := c.doJSON(http.MethodPost, "/apps/"+app+"/deployments/"+id+"/cancel", nil, "", &out); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }
 
@@ -314,6 +338,38 @@ func (c *Client) Login(username, password string) (*LoginResp, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) CreateAPIToken(name string, scopes []string, expiresAt string) (*APITokenCreated, error) {
+	payload := struct {
+		Name      string   `json:"name"`
+		Scopes    []string `json:"scopes,omitempty"`
+		ExpiresAt *string  `json:"expires_at,omitempty"`
+	}{Name: name, Scopes: scopes}
+	if expiresAt != "" {
+		payload.ExpiresAt = &expiresAt
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode token request: %w", err)
+	}
+	var out APITokenCreated
+	if err := c.doJSON(http.MethodPost, "/me/tokens", bytes.NewReader(body), "application/json", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) ListAPITokens() ([]APIToken, error) {
+	var out []APIToken
+	if err := c.doJSON(http.MethodGet, "/me/tokens", nil, "", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) RevokeAPIToken(id string) error {
+	return c.doJSON(http.MethodDelete, "/me/tokens/"+id, nil, "", nil)
 }
 
 type EnvKey struct {

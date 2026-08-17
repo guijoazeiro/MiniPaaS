@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/guijoazeiro/MiniPaaS/cli/internal/api"
 	cfgpkg "github.com/guijoazeiro/MiniPaaS/cli/internal/config"
@@ -14,6 +15,13 @@ var (
 	apiClient *api.Client
 	stored    *cfgpkg.Config
 )
+
+func configuredToken(saved string) string {
+	if token := strings.TrimSpace(os.Getenv("MINIPAAS_TOKEN")); token != "" {
+		return token
+	}
+	return saved
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "minip",
@@ -36,7 +44,7 @@ var rootCmd = &cobra.Command{
 				host = "http://localhost:8080"
 			}
 		}
-		apiClient = api.New(host, c.Token)
+		apiClient = api.New(host, configuredToken(c.Token))
 		return nil
 	},
 }

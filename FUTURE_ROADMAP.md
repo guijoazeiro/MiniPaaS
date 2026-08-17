@@ -154,6 +154,22 @@ This phase adds the minimum account and multi-user foundation needed by the dash
 
 Manual validation remains for the complete browser flow: register a second user, confirm that each account sees only its own applications, update credentials, and delete an application after confirming the exact name.
 
+## Phase 15.1 — API tokens for automation and CI/CD
+
+This phase adds personal API tokens without weakening the existing dashboard/session authentication:
+
+- migration `017_create_api_tokens` stores only a SHA-256 token hash, a display prefix, scopes, creation/usage timestamps, expiration, and revocation state;
+- generated secrets use the `mpat_` prefix and at least 256 bits of cryptographic entropy;
+- the raw token is returned only by `POST /me/tokens` at creation time and is never returned by listing, revocation, logs, audit events, or later API responses;
+- `GET /me/tokens` and `DELETE /me/tokens/:id` are owner-scoped and require a dashboard/JWT session, so an automation token cannot create or revoke credentials;
+- `read`, `deploy`, and `manage` scopes are enforced centrally with deny-by-default route policies;
+- API-token requests keep the same user ownership boundaries as dashboard requests and cannot elevate the owner's permissions;
+- the CLI supports `MINIPAAS_TOKEN` with priority over `config.json`, without persisting environment-provided secrets, plus `minip tokens create/list/revoke`;
+- the Account page can create, list, copy once, and revoke tokens with confirmation;
+- `last_used_at` is updated when a token authenticates, while expired or revoked tokens are rejected immediately.
+
+Use a short-lived token with the smallest required scope in each CI/CD system, store it in the platform's secret manager, and rotate/revoke it when a workflow or person no longer needs access. Long-term token analytics, organization/team roles, and distributed rate limiting remain future improvements.
+
 ## Later opportunities
 
 These ideas can add value after the core Git and safe-deployment experience is solid:
@@ -163,7 +179,6 @@ These ideas can add value after the core Git and safe-deployment experience is s
 - A deployment queue with per-host concurrency control.
 - Notifications for deployment results through email, Slack, or webhooks.
 - Team accounts, roles, and per-application permissions.
-- Personal API tokens separate from login sessions.
 - Persistent volumes with an explicit backup strategy.
 - Preview environments for pull requests.
 - GitLab and generic Git provider support.
