@@ -43,8 +43,8 @@ var logsCmd = &cobra.Command{
 		}
 
 		hdr := http.Header{}
-		if stored != nil && stored.Token != "" {
-			hdr.Set("Authorization", "Bearer "+stored.Token)
+		if apiClient != nil && apiClient.Token() != "" {
+			hdr.Set("Authorization", "Bearer "+apiClient.Token())
 		}
 
 		conn, resp, err := websocket.DefaultDialer.Dial(wsURL, hdr)
