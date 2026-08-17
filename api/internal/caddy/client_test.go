@@ -17,6 +17,7 @@ type fakeCaddy struct {
 	hasServer         bool
 	unknownIDOnDelete bool
 	unknownIDOnPatch  bool
+	httpAppMissing    bool
 }
 
 type recorded struct {
@@ -35,6 +36,9 @@ func (f *fakeCaddy) handler() http.Handler {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers/srv0"):
 			if f.hasServer {
 				_, _ = w.Write([]byte(`{"listen":[":80"],"routes":[]}`))
+			} else if f.httpAppMissing {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"invalid traversal path at: config/apps/http"}`))
 			} else {
 				_, _ = w.Write([]byte(`null`))
 			}
@@ -125,6 +129,22 @@ func newClient(t *testing.T, f *fakeCaddy) *Client {
 }
 
 func TestEnsureBaseBootstrapsWhenMissing(t *testing.T) {
+	f := &fakeCaddy{hasServer: false, httpAppMissing: true}
+	c := newClient(t, f)
+
+	if err := c.EnsureBase(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests) != 2 {
+		t.Fatalf("got %d requests, want 2 (probe + put)", len(f.requests))
+	}
+	put := f.requests[1]
+	if put.Method != http.MethodPut || put.Path != "/config/apps/http" {
+		t.Fatalf("wrong bootstrap request: %+v", put)
+	}
+}
+
+func TestEnsureBaseAddsServerToExistingHTTPApp(t *testing.T) {
 	f := &fakeCaddy{hasServer: false}
 	c := newClient(t, f)
 
@@ -135,8 +155,8 @@ func TestEnsureBaseBootstrapsWhenMissing(t *testing.T) {
 		t.Fatalf("got %d requests, want 2 (probe + put)", len(f.requests))
 	}
 	put := f.requests[1]
-	if put.Method != http.MethodPut || put.Path != "/config/apps/http/servers" {
-		t.Fatalf("wrong bootstrap request: %+v", put)
+	if put.Method != http.MethodPut || put.Path != "/config/apps/http/servers/srv0" {
+		t.Fatalf("wrong server creation request: %+v", put)
 	}
 }
 
