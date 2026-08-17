@@ -6,6 +6,21 @@ export type User = {
   created_at: string;
 };
 
+export type APIToken = {
+  id: string;
+  name: string;
+  token_prefix: string;
+  scopes: string[];
+  expires_at?: string;
+  revoked_at?: string;
+  last_used_at?: string;
+  created_at: string;
+};
+
+export type APITokenCreated = APIToken & {
+  token: string;
+};
+
 export type App = {
   id: string;
   name: string;
