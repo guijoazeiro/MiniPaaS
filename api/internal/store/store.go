@@ -35,6 +35,14 @@ type UserStore interface {
 	Count(ctx context.Context) (int64, error)
 }
 
+type APITokenStore interface {
+	CreateAPIToken(ctx context.Context, userID uuid.UUID, name, tokenHash, tokenPrefix string, scopes []string, expiresAt *time.Time) (domain.APIToken, error)
+	ListAPITokens(ctx context.Context, userID uuid.UUID) ([]domain.APIToken, error)
+	GetAPITokenByHash(ctx context.Context, tokenHash string) (domain.APIToken, error)
+	RevokeAPIToken(ctx context.Context, userID, tokenID uuid.UUID) error
+	TouchAPIToken(ctx context.Context, tokenID uuid.UUID) error
+}
+
 type EnvVarRecord struct {
 	Key       string
 	Value     []byte

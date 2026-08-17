@@ -16,6 +16,7 @@ import (
 	"github.com/guijoazeiro/MiniPaaS/api/internal/config"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/crypto"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/docker"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/githubapp"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/handler/middleware"
@@ -75,6 +76,7 @@ func main() {
 	domainStore := postgres.NewCustomDomainStore(q)
 	depLogStore := postgres.NewDeploymentLogStore(q)
 	userStore := postgres.NewUserStore(q)
+	apiTokenStore := postgres.NewAPITokenStore(q)
 	envStore := postgres.NewEnvStore(q)
 	rollbackStore := postgres.NewRollbackStore(q)
 	gitSourceStore := postgres.NewGitSourceStore(q)
@@ -97,6 +99,8 @@ func main() {
 	}
 
 	authSvc := service.NewAuthService(userStore, []byte(cfg.JWTSecret), cfg.TokenTTL, log)
+	apiTokenSvc := service.NewAPITokenService(apiTokenStore)
+	authenticator := service.NewAuthenticator(authSvc, apiTokenSvc)
 	envSvc := service.NewEnvService(envStore, cipher)
 	appSvc := service.NewAppService(appStore)
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
@@ -140,6 +144,7 @@ func main() {
 	}
 
 	authH := handler.NewAuthHandler(authSvc, log)
+	apiTokenH := handler.NewAPITokenHandler(apiTokenSvc, log)
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	domainH := handler.NewCustomDomainHandler(domainSvc, log)
 	metricsH := handler.NewMetricsHandler(metricsSvc, log)
@@ -179,51 +184,54 @@ func main() {
 	r.POST("/auth/logout", authH.Logout)
 	r.POST("/integrations/github/webhook", webhookRateLimiter.RateLimit(middleware.RemoteIPKey), githubWebhookH.Handle)
 
-	auth := r.Group("/", middleware.Auth(authSvc))
+	auth := r.Group("/", middleware.Auth(authenticator))
 
-	auth.GET("/me", authH.Me)
-	auth.PATCH("/me", authH.UpdateMe)
-	auth.PATCH("/me/password", authH.UpdatePassword)
-	auth.POST("/apps", appH.Create)
-	auth.GET("/apps", appH.List)
-	auth.GET("/apps/:name", appH.Get)
-	auth.POST("/apps/:name/stop", appH.Stop)
-	auth.DELETE("/apps/:name", appH.Delete)
-	auth.GET("/apps/:name/metrics", metricsH.Get)
-	auth.GET("/apps/:name/domains", domainH.List)
-	auth.POST("/apps/:name/domains", domainH.Create)
-	auth.POST("/apps/:name/domains/:domainID/verify", domainH.Verify)
-	auth.DELETE("/apps/:name/domains/:domainID", domainH.Delete)
+	auth.GET("/me", middleware.RequireScope(domain.APITokenScopeRead), authH.Me)
+	auth.PATCH("/me", middleware.RequireSession(), authH.UpdateMe)
+	auth.PATCH("/me/password", middleware.RequireSession(), authH.UpdatePassword)
+	auth.POST("/me/tokens", middleware.RequireSession(), apiTokenH.Create)
+	auth.GET("/me/tokens", middleware.RequireSession(), apiTokenH.List)
+	auth.DELETE("/me/tokens/:id", middleware.RequireSession(), apiTokenH.Revoke)
+	auth.POST("/apps", middleware.RequireScope(domain.APITokenScopeManage), appH.Create)
+	auth.GET("/apps", middleware.RequireScope(domain.APITokenScopeRead), appH.List)
+	auth.GET("/apps/:name", middleware.RequireScope(domain.APITokenScopeRead), appH.Get)
+	auth.POST("/apps/:name/stop", middleware.RequireScope(domain.APITokenScopeManage), appH.Stop)
+	auth.DELETE("/apps/:name", middleware.RequireScope(domain.APITokenScopeManage), appH.Delete)
+	auth.GET("/apps/:name/metrics", middleware.RequireScope(domain.APITokenScopeRead), metricsH.Get)
+	auth.GET("/apps/:name/domains", middleware.RequireScope(domain.APITokenScopeRead), domainH.List)
+	auth.POST("/apps/:name/domains", middleware.RequireScope(domain.APITokenScopeManage), domainH.Create)
+	auth.POST("/apps/:name/domains/:domainID/verify", middleware.RequireScope(domain.APITokenScopeManage), domainH.Verify)
+	auth.DELETE("/apps/:name/domains/:domainID", middleware.RequireScope(domain.APITokenScopeManage), domainH.Delete)
 
-	auth.POST("/apps/:name/deployments", depH.Create)
-	auth.GET("/deployments", depH.ListAll)
-	auth.POST("/apps/:name/deployments/git", gitH.Deploy)
-	auth.GET("/apps/:name/deployments", depH.List)
-	auth.GET("/apps/:name/deployments/:id", depH.Get)
-	auth.GET("/apps/:name/deployments/:id/logs", depH.Logs)
-	auth.POST("/apps/:name/deployments/:id/cancel", depH.Cancel)
-	auth.POST("/apps/:name/deployments/:id/retry", depH.Retry)
-	auth.POST("/apps/:name/rollback", depH.Rollback)
-	auth.PUT("/apps/:name/source/git", gitH.Configure)
-	auth.PUT("/apps/:name/source/github-app", gitH.ConfigureGitHubApp)
-	auth.GET("/apps/:name/source/git", gitH.Get)
-	auth.DELETE("/apps/:name/source/git", gitH.Delete)
-	auth.PATCH("/apps/:name/source/git/auto-deploy", gitH.SetAutoDeploy)
+	auth.POST("/apps/:name/deployments", middleware.RequireScope(domain.APITokenScopeDeploy), depH.Create)
+	auth.GET("/deployments", middleware.RequireScope(domain.APITokenScopeRead), depH.ListAll)
+	auth.POST("/apps/:name/deployments/git", middleware.RequireScope(domain.APITokenScopeDeploy), gitH.Deploy)
+	auth.GET("/apps/:name/deployments", middleware.RequireScope(domain.APITokenScopeRead), depH.List)
+	auth.GET("/apps/:name/deployments/:id", middleware.RequireScope(domain.APITokenScopeRead), depH.Get)
+	auth.GET("/apps/:name/deployments/:id/logs", middleware.RequireScope(domain.APITokenScopeRead), depH.Logs)
+	auth.POST("/apps/:name/deployments/:id/cancel", middleware.RequireScope(domain.APITokenScopeDeploy), depH.Cancel)
+	auth.POST("/apps/:name/deployments/:id/retry", middleware.RequireScope(domain.APITokenScopeDeploy), depH.Retry)
+	auth.POST("/apps/:name/rollback", middleware.RequireScope(domain.APITokenScopeDeploy), depH.Rollback)
+	auth.PUT("/apps/:name/source/git", middleware.RequireScope(domain.APITokenScopeManage), gitH.Configure)
+	auth.PUT("/apps/:name/source/github-app", middleware.RequireScope(domain.APITokenScopeManage), gitH.ConfigureGitHubApp)
+	auth.GET("/apps/:name/source/git", middleware.RequireScope(domain.APITokenScopeRead), gitH.Get)
+	auth.DELETE("/apps/:name/source/git", middleware.RequireScope(domain.APITokenScopeManage), gitH.Delete)
+	auth.PATCH("/apps/:name/source/git/auto-deploy", middleware.RequireScope(domain.APITokenScopeManage), gitH.SetAutoDeploy)
 
-	auth.GET("/integrations/github/status", githubH.Status)
-	auth.GET("/integrations/github/install-url", githubH.InstallURL)
-	auth.GET("/integrations/github/account-install-url", githubH.AccountInstallURL)
-	auth.GET("/integrations/github/callback", githubH.Callback)
-	auth.GET("/integrations/github/installations", githubH.ListInstallations)
-	auth.GET("/integrations/github/installations/:id/repositories", githubH.ListRepositories)
-	auth.GET("/audit", auditH.List)
+	auth.GET("/integrations/github/status", middleware.RequireScope(domain.APITokenScopeRead), githubH.Status)
+	auth.GET("/integrations/github/install-url", middleware.RequireSession(), githubH.InstallURL)
+	auth.GET("/integrations/github/account-install-url", middleware.RequireSession(), githubH.AccountInstallURL)
+	auth.GET("/integrations/github/callback", middleware.RequireSession(), githubH.Callback)
+	auth.GET("/integrations/github/installations", middleware.RequireScope(domain.APITokenScopeRead), githubH.ListInstallations)
+	auth.GET("/integrations/github/installations/:id/repositories", middleware.RequireScope(domain.APITokenScopeRead), githubH.ListRepositories)
+	auth.GET("/audit", middleware.RequireScope(domain.APITokenScopeRead), auditH.List)
 
-	auth.GET("/apps/:name/env", envH.List)
-	auth.PUT("/apps/:name/env/:key", envH.Set)
-	auth.DELETE("/apps/:name/env/:key", envH.Delete)
+	auth.GET("/apps/:name/env", middleware.RequireScope(domain.APITokenScopeRead), envH.List)
+	auth.PUT("/apps/:name/env/:key", middleware.RequireScope(domain.APITokenScopeManage), envH.Set)
+	auth.DELETE("/apps/:name/env/:key", middleware.RequireScope(domain.APITokenScopeManage), envH.Delete)
 
-	auth.GET("/apps/:name/logs", wsH.Serve)
-	auth.GET("/apps/:name/metrics/stream", metricsWS.Serve)
+	auth.GET("/apps/:name/logs", middleware.RequireScope(domain.APITokenScopeRead), wsH.Serve)
+	auth.GET("/apps/:name/metrics/stream", middleware.RequireScope(domain.APITokenScopeRead), metricsWS.Serve)
 
 	srv := &http.Server{
 		Addr:              cfg.Port,
