@@ -1,5 +1,6 @@
 import type { FormEvent } from "react";
 import type { GitHubInstallation, GitHubRepository, GitSource } from "../types";
+import { GitHubIcon } from "./GitHubIcon";
 
 type GitMode = "public" | "github_app";
 
@@ -78,7 +79,7 @@ export function GitDeployPanel(props: Props) {
                   </select>
                 </label>
                 <button type="button" className="button secondary github-install-button" onClick={props.onInstallGitHubApp} disabled={props.githubLoading}>
-                  {props.installations.length ? "Alterar acesso no GitHub" : "Instalar GitHub App"}
+                  <GitHubIcon size={16} /> {props.installations.length ? "Alterar acesso no GitHub" : "Instalar GitHub App"}
                 </button>
                 <p className="git-help github-account-help">As instalações exibidas pertencem à sua conta MiniPaaS. O botão abre o GitHub para autorizar este App na conta ou organização desejada.</p>
               </>
