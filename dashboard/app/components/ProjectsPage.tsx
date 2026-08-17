@@ -1,26 +1,52 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime, stateLabel, request } from "../lib/api";
 import type { Deployment, DeploymentPage } from "../types";
 import { useDashboard } from "./DashboardShell";
 
 export function ProjectsPage() {
-  const { apps, openNewProject, setFeedback } = useDashboard();
+  const { apps, openNewProject, refreshApps, setFeedback } = useDashboard();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const deploymentRequest = useRef<Promise<void> | null>(null);
 
   const loadDeployments = useCallback(() => {
-    return request<DeploymentPage>("/deployments?per_page=200")
-      .then((page) => setDeployments(page.items))
-      .catch((cause: unknown) => setFeedback(cause instanceof Error ? cause.message : "Não foi possível carregar os deployments.", "error"));
-  }, [setFeedback]);
+    if (deploymentRequest.current) return deploymentRequest.current;
+
+    const promise = request<DeploymentPage>("/deployments?per_page=200")
+      .then((page) => {
+        setDeployments(page.items);
+        setLastUpdated(new Date());
+      });
+    deploymentRequest.current = promise;
+    promise.then(
+      () => { if (deploymentRequest.current === promise) deploymentRequest.current = null; },
+      () => { if (deploymentRequest.current === promise) deploymentRequest.current = null; },
+    );
+    return promise;
+  }, []);
 
   useEffect(() => {
-    const initialTimer = window.setTimeout(() => void loadDeployments(), 0);
-    const timer = window.setInterval(() => void loadDeployments(), 5000);
+    const initialTimer = window.setTimeout(() => void loadDeployments().catch(() => undefined), 0);
+    const timer = window.setInterval(() => void loadDeployments().catch(() => undefined), 5000);
     return () => { window.clearTimeout(initialTimer); window.clearInterval(timer); };
   }, [loadDeployments]);
+
+  const refreshProjects = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshApps(), loadDeployments()]);
+      setLastUpdated(new Date());
+    } catch (cause: unknown) {
+      setFeedback(cause instanceof Error ? cause.message : "Não foi possível atualizar os projetos.", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadDeployments, refreshApps, refreshing, setFeedback]);
 
   const latestByApp = useMemo(() => {
     const latest = new Map<string, Deployment>();
@@ -49,7 +75,18 @@ export function ProjectsPage() {
       </section>
 
       <section className="panel project-directory">
-        <div className="directory-heading"><div><h2>Todos os projetos</h2><p>Visão geral da sua plataforma.</p></div><span className="count">{apps.length}</span></div>
+        <div className="directory-heading">
+          <div><h2>Todos os projetos</h2><p>Visão geral da sua plataforma.</p></div>
+          <div className="project-heading-actions">
+            <small className="muted" aria-live="polite">
+              {refreshing ? "Atualizando…" : lastUpdated ? `Atualizado às ${lastUpdated.toLocaleTimeString("pt-BR")}` : "Aguardando atualização"}
+            </small>
+            <span className="count">{apps.length}</span>
+            <button className="button secondary" type="button" onClick={() => void refreshProjects()} disabled={refreshing} aria-label="Atualizar projetos">
+              {refreshing ? "Atualizando…" : "Atualizar"}
+            </button>
+          </div>
+        </div>
         {apps.length === 0 ? (
           <div className="empty-state roomy"><p className="eyebrow">PRIMEIRO PROJETO</p><h2>Sua plataforma está pronta.</h2><p>Crie uma aplicação para configurar a origem e iniciar o primeiro deploy.</p><button className="button primary" onClick={openNewProject}>Criar projeto</button></div>
         ) : (

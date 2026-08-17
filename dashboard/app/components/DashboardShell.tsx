@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, request } from "../lib/api";
 import { useTheme } from "../hooks/useTheme";
 import type { App } from "../types";
 import { NewAppModal } from "./NewAppModal";
+import { ToastViewport, type ToastNotice } from "./ToastViewport";
 
 type DashboardContextValue = {
   apps: App[];
@@ -51,11 +52,22 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [newAppName, setNewAppName] = useState("");
   const [creatingApp, setCreatingApp] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [feedback, setFeedbackState] = useState<{ message: string; kind: "success" | "error" } | null>(null);
+  const [feedback, setFeedbackState] = useState<ToastNotice[]>([]);
+  const feedbackSequence = useRef(0);
   const closeNewApp = useCallback(() => setShowNewApp(false), []);
 
   const setFeedback = useCallback((message: string, kind: "success" | "error" = "success") => {
-    setFeedbackState(message ? { message, kind } : null);
+    if (!message) {
+      setFeedbackState([]);
+      return;
+    }
+
+    const toast: ToastNotice = { id: ++feedbackSequence.current, message, kind };
+    setFeedbackState((current) => [...current, toast].slice(-5));
+  }, []);
+
+  const dismissFeedback = useCallback((id: number) => {
+    setFeedbackState((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
   const refreshApps = useCallback(async () => {
@@ -195,7 +207,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          {feedback && <div className={`feedback ${feedback.kind}`} role="status"><span>{feedback.message}</span><button onClick={() => setFeedbackState(null)} aria-label="Fechar aviso">Fechar</button></div>}
+          <ToastViewport toasts={feedback} onDismiss={dismissFeedback} />
           <div className="page-content">{children}</div>
         </section>
 

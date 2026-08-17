@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func testPrivateKey(t *testing.T) []byte {
@@ -78,19 +79,33 @@ func TestStateSignerRejectsExpiredAndTamperedState(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	signer := NewStateSigner([]byte("state-secret"))
 	signer.now = func() time.Time { return now }
-	state, err := signer.Sign("private-api")
+	userID := uuid.New()
+	state, err := signer.Sign("private-api", userID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	appName, err := signer.Verify(state)
-	if err != nil || appName != "private-api" {
-		t.Fatalf("Verify() = %q, %v", appName, err)
+	appName, gotUserID, err := signer.Verify(state)
+	if err != nil || appName != "private-api" || gotUserID != userID {
+		t.Fatalf("Verify() = %q/%s, %v", appName, gotUserID, err)
 	}
-	if _, err := signer.Verify(state + "x"); err == nil {
+	if _, _, err := signer.Verify(state + "x"); err == nil {
 		t.Fatal("tampered state was accepted")
 	}
 	signer.now = func() time.Time { return now.Add(11 * time.Minute) }
-	if _, err := signer.Verify(state); err == nil {
+	if _, _, err := signer.Verify(state); err == nil {
 		t.Fatal("expired state was accepted")
+	}
+}
+
+func TestStateSignerSupportsAccountTarget(t *testing.T) {
+	signer := NewStateSigner([]byte("state-secret"))
+	userID := uuid.New()
+	state, err := signer.SignAccount(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appName, gotUserID, target, err := signer.VerifyTarget(state)
+	if err != nil || appName != "" || gotUserID != userID || target != "account" {
+		t.Fatalf("VerifyTarget() = %q/%s/%q, %v", appName, gotUserID, target, err)
 	}
 }

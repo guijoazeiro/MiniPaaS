@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { formatTime, request } from "../lib/api";
-import type { User } from "../types";
+import type { GitHubInstallation, User } from "../types";
+import { GitHubIcon } from "./GitHubIcon";
 import { useDashboard } from "./DashboardShell";
 
 export function AccountPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { setFeedback } = useDashboard();
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState("");
@@ -16,6 +20,27 @@ export function AccountPage() {
   const [savingUsername, setSavingUsername] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [error, setError] = useState("");
+  const [githubEnabled, setGitHubEnabled] = useState(false);
+  const [githubInstallations, setGitHubInstallations] = useState<GitHubInstallation[]>([]);
+  const [githubLoading, setGitHubLoading] = useState(true);
+  const [githubInstalling, setGitHubInstalling] = useState(false);
+
+  async function loadGitHubInstallations() {
+    setGitHubLoading(true);
+    try {
+      const status = await request<{ enabled: boolean }>("/integrations/github/status");
+      setGitHubEnabled(status.enabled);
+      if (!status.enabled) {
+        setGitHubInstallations([]);
+        return;
+      }
+      setGitHubInstallations(await request<GitHubInstallation[]>("/integrations/github/installations"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível carregar as conexões do GitHub.");
+    } finally {
+      setGitHubLoading(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -31,6 +56,19 @@ export function AccountPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadGitHubInstallations(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (searchParams.get("github") !== "connected") return;
+    setFeedback("GitHub App conectado à sua conta MiniPaaS.");
+    const timer = window.setTimeout(() => { void loadGitHubInstallations(); }, 0);
+    router.replace("/dashboard/account");
+    return () => window.clearTimeout(timer);
+  }, [router, searchParams, setFeedback]);
 
   async function updateUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,6 +107,17 @@ export function AccountPage() {
     }
   }
 
+  async function installGitHubApp() {
+    setGitHubInstalling(true);
+    try {
+      const response = await request<{ url: string }>("/integrations/github/account-install-url");
+      window.location.assign(response.url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a instalação do GitHub App.");
+      setGitHubInstalling(false);
+    }
+  }
+
   if (loading) return <div className="list-placeholder">Carregando conta…</div>;
   if (!user) return <div className="list-placeholder">{error || "Conta indisponível."}</div>;
 
@@ -95,6 +144,16 @@ export function AccountPage() {
           </form>
         </section>
       </div>
+      <section className="panel account-card">
+        <div className="section-heading"><div><p className="eyebrow">INTEGRAÇÕES</p><h2>Contas do GitHub</h2></div><GitHubIcon size={22} /></div>
+        <p className="panel-description">Conecte uma conta ou organização para acessar repositórios privados durante os deploys.</p>
+        {githubLoading ? <p className="panel-description">Carregando instalações…</p> : !githubEnabled ? <p className="panel-description">O GitHub App ainda não está configurado nesta instância.</p> : (
+          <>
+            {githubInstallations.length > 0 ? <div className="github-installations" aria-label="Contas GitHub conectadas">{githubInstallations.map((installation) => <div className="github-installation" key={installation.installation_id}><strong>{installation.account_login}</strong><span>{installation.account_type} · acesso {installation.repository_selection}</span></div>)}</div> : <p className="panel-description">Nenhuma conta GitHub conectada.</p>}
+            <button className="button secondary github-account-action" type="button" onClick={installGitHubApp} disabled={githubInstalling}><GitHubIcon size={16} /> {githubInstalling ? "Abrindo GitHub…" : githubInstallations.length ? "Conectar outra conta" : "Conectar GitHub"}</button>
+          </>
+        )}
+      </section>
       <p className="panel-description account-note">A MiniPaaS não armazena senhas em texto puro. A sessão é renovada após alterações de credenciais.</p>
     </div>
   );

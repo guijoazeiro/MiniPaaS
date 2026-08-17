@@ -7,10 +7,12 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getGitHubInstallation = `-- name: GetGitHubInstallation :one
-SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at FROM github_installations WHERE installation_id = $1
+SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at, owner_user_id FROM github_installations WHERE installation_id = $1
 `
 
 func (q *Queries) GetGitHubInstallation(ctx context.Context, installationID int64) (GithubInstallation, error) {
@@ -23,12 +25,38 @@ func (q *Queries) GetGitHubInstallation(ctx context.Context, installationID int6
 		&i.RepositorySelection,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerUserID,
+	)
+	return i, err
+}
+
+const getGitHubInstallationForUser = `-- name: GetGitHubInstallationForUser :one
+SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at, owner_user_id FROM github_installations
+WHERE installation_id = $1 AND owner_user_id = $2
+`
+
+type GetGitHubInstallationForUserParams struct {
+	InstallationID int64       `json:"installation_id"`
+	OwnerUserID    pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) GetGitHubInstallationForUser(ctx context.Context, arg GetGitHubInstallationForUserParams) (GithubInstallation, error) {
+	row := q.db.QueryRow(ctx, getGitHubInstallationForUser, arg.InstallationID, arg.OwnerUserID)
+	var i GithubInstallation
+	err := row.Scan(
+		&i.InstallationID,
+		&i.AccountLogin,
+		&i.AccountType,
+		&i.RepositorySelection,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const listGitHubInstallations = `-- name: ListGitHubInstallations :many
-SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at FROM github_installations ORDER BY account_login, installation_id
+SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at, owner_user_id FROM github_installations ORDER BY account_login, installation_id
 `
 
 func (q *Queries) ListGitHubInstallations(ctx context.Context) ([]GithubInstallation, error) {
@@ -47,6 +75,41 @@ func (q *Queries) ListGitHubInstallations(ctx context.Context) ([]GithubInstalla
 			&i.RepositorySelection,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGitHubInstallationsForUser = `-- name: ListGitHubInstallationsForUser :many
+SELECT installation_id, account_login, account_type, repository_selection, created_at, updated_at, owner_user_id FROM github_installations
+WHERE owner_user_id = $1
+ORDER BY account_login, installation_id
+`
+
+func (q *Queries) ListGitHubInstallationsForUser(ctx context.Context, ownerUserID pgtype.UUID) ([]GithubInstallation, error) {
+	rows, err := q.db.Query(ctx, listGitHubInstallationsForUser, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GithubInstallation
+	for rows.Next() {
+		var i GithubInstallation
+		if err := rows.Scan(
+			&i.InstallationID,
+			&i.AccountLogin,
+			&i.AccountType,
+			&i.RepositorySelection,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -59,21 +122,25 @@ func (q *Queries) ListGitHubInstallations(ctx context.Context) ([]GithubInstalla
 }
 
 const upsertGitHubInstallation = `-- name: UpsertGitHubInstallation :one
-INSERT INTO github_installations (installation_id, account_login, account_type, repository_selection)
-VALUES ($1, $2, $3, $4)
+INSERT INTO github_installations (installation_id, account_login, account_type, repository_selection, owner_user_id)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (installation_id) DO UPDATE SET
     account_login = EXCLUDED.account_login,
     account_type = EXCLUDED.account_type,
     repository_selection = EXCLUDED.repository_selection,
+    owner_user_id = EXCLUDED.owner_user_id,
     updated_at = now()
-RETURNING installation_id, account_login, account_type, repository_selection, created_at, updated_at
+WHERE github_installations.owner_user_id IS NULL
+   OR github_installations.owner_user_id = EXCLUDED.owner_user_id
+RETURNING installation_id, account_login, account_type, repository_selection, created_at, updated_at, owner_user_id
 `
 
 type UpsertGitHubInstallationParams struct {
-	InstallationID      int64  `json:"installation_id"`
-	AccountLogin        string `json:"account_login"`
-	AccountType         string `json:"account_type"`
-	RepositorySelection string `json:"repository_selection"`
+	InstallationID      int64       `json:"installation_id"`
+	AccountLogin        string      `json:"account_login"`
+	AccountType         string      `json:"account_type"`
+	RepositorySelection string      `json:"repository_selection"`
+	OwnerUserID         pgtype.UUID `json:"owner_user_id"`
 }
 
 func (q *Queries) UpsertGitHubInstallation(ctx context.Context, arg UpsertGitHubInstallationParams) (GithubInstallation, error) {
@@ -82,6 +149,7 @@ func (q *Queries) UpsertGitHubInstallation(ctx context.Context, arg UpsertGitHub
 		arg.AccountLogin,
 		arg.AccountType,
 		arg.RepositorySelection,
+		arg.OwnerUserID,
 	)
 	var i GithubInstallation
 	err := row.Scan(
@@ -91,6 +159,7 @@ func (q *Queries) UpsertGitHubInstallation(ctx context.Context, arg UpsertGitHub
 		&i.RepositorySelection,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

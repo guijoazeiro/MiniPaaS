@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 
+	"github.com/google/uuid"
+	"github.com/guijoazeiro/MiniPaaS/api/internal/authctx"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/domain"
 	"github.com/guijoazeiro/MiniPaaS/api/internal/store"
 )
@@ -14,8 +16,10 @@ type GitHubAppClient interface {
 }
 
 type GitHubStateSigner interface {
-	Sign(appName string) (string, error)
-	Verify(raw string) (string, error)
+	Sign(appName string, userID uuid.UUID) (string, error)
+	SignAccount(userID uuid.UUID) (string, error)
+	Verify(raw string) (string, uuid.UUID, error)
+	VerifyTarget(raw string) (string, uuid.UUID, string, error)
 }
 
 type GitHubAppService struct {
@@ -40,7 +44,26 @@ func (s *GitHubAppService) InstallURL(ctx context.Context, appName string) (stri
 	if _, err := s.apps.GetByName(ctx, appName); err != nil {
 		return "", err
 	}
-	state, err := s.states.Sign(appName)
+	userID, ok := authctx.UserID(ctx)
+	if !ok {
+		return "", domain.ErrUnauthorized
+	}
+	state, err := s.states.Sign(appName, userID)
+	if err != nil {
+		return "", err
+	}
+	return s.client.InstallURL(state), nil
+}
+
+func (s *GitHubAppService) AccountInstallURL(ctx context.Context) (string, error) {
+	if !s.Enabled() {
+		return "", domain.ErrGitHubAppNotConfigured
+	}
+	userID, ok := authctx.UserID(ctx)
+	if !ok {
+		return "", domain.ErrUnauthorized
+	}
+	state, err := s.states.SignAccount(userID)
 	if err != nil {
 		return "", err
 	}
@@ -51,12 +74,18 @@ func (s *GitHubAppService) Connect(ctx context.Context, installationID int64, st
 	if !s.Enabled() || installationID <= 0 {
 		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
 	}
-	appName, err := s.states.Verify(state)
+	appName, stateUserID, target, err := s.states.VerifyTarget(state)
 	if err != nil {
 		return "", domain.GitHubInstallation{}, err
 	}
-	if _, err := s.apps.GetByName(ctx, appName); err != nil {
-		return "", domain.GitHubInstallation{}, err
+	userID, ok := authctx.UserID(ctx)
+	if !ok || userID != stateUserID {
+		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
+	}
+	if target == "app" {
+		if _, err := s.apps.GetByName(ctx, appName); err != nil {
+			return "", domain.GitHubInstallation{}, err
+		}
 	}
 	installation, err := s.client.Installation(ctx, installationID)
 	if err != nil {

@@ -413,7 +413,7 @@ minip apps retry <name> <deployment-id> # retry a failed/cancelled Git deploymen
 minip apps cancel <name> <deployment-id> # cancel a pending/building deployment
 minip apps connect-github <name> --repo owner/repository
 minip apps connect-github <name> --repo owner/repository --branch main --context services/api --dockerfile Dockerfile
-minip apps github-installations
+minip apps github-installations       # installations autorizadas pela conta atual
 minip apps github-repositories <installation-id>
 minip apps connect-github <name> --installation <id> --repository-id <id>
 minip apps auto-deploy <name> on
@@ -456,7 +456,7 @@ Example for a monorepo whose application lives in `services/api`:
 
 ### Private repositories with a GitHub App
 
-Phase 9.2 supports private repositories through an instance-owned GitHub App. MiniPaaS stores only installation and repository identifiers. It requests a repository-scoped installation token when listing or cloning and never persists or returns that token.
+Phase 9.2 supports private repositories through an instance-owned GitHub App. Each MiniPaaS user installs that same App in their own GitHub account or organization; MiniPaaS stores the installation owner and exposes only that user's installations. It requests a repository-scoped installation token when listing or cloning and never persists or returns that token.
 
 Create a GitHub App with:
 
@@ -476,7 +476,7 @@ The CLI can reuse an installation created through the dashboard:
 .\minip.exe deploy --git --app hello --wait
 ```
 
-The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value. This Phase 9.2 flow assumes the GitHub App is private and controlled by the same administrator as the self-hosted MiniPaaS instance.
+The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value bound to both the application and the MiniPaaS user. This Phase 9.2 flow assumes the GitHub App is private and controlled by the same administrator as the self-hosted MiniPaaS instance; GitHub account access is granted separately when each user installs the App.
 
 ### Signed push auto-deploy
 

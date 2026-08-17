@@ -13,7 +13,7 @@ func respondError(c *gin.Context, log *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, domain.ErrAppNotFound), errors.Is(err, domain.ErrDeploymentNotFound), errors.Is(err, domain.ErrGitSourceNotFound), errors.Is(err, domain.ErrGitHubInstallationNotFound), errors.Is(err, domain.ErrCustomDomainNotFound), errors.Is(err, domain.ErrUserNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrAppNameTaken), errors.Is(err, domain.ErrCustomDomainTaken), errors.Is(err, domain.ErrUsernameTaken):
+	case errors.Is(err, domain.ErrAppNameTaken), errors.Is(err, domain.ErrCustomDomainTaken), errors.Is(err, domain.ErrUsernameTaken), errors.Is(err, domain.ErrGitHubInstallationOwned):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrDeploymentActive), errors.Is(err, domain.ErrDeploymentNotRollbackable), errors.Is(err, domain.ErrDeploymentNotCancellable), errors.Is(err, domain.ErrDeploymentNotRetryable), errors.Is(err, domain.ErrDeploymentRetryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
