@@ -17,7 +17,9 @@ type GitHubAppClient interface {
 
 type GitHubStateSigner interface {
 	Sign(appName string, userID uuid.UUID) (string, error)
+	SignAccount(userID uuid.UUID) (string, error)
 	Verify(raw string) (string, uuid.UUID, error)
+	VerifyTarget(raw string) (string, uuid.UUID, string, error)
 }
 
 type GitHubAppService struct {
@@ -53,11 +55,26 @@ func (s *GitHubAppService) InstallURL(ctx context.Context, appName string) (stri
 	return s.client.InstallURL(state), nil
 }
 
+func (s *GitHubAppService) AccountInstallURL(ctx context.Context) (string, error) {
+	if !s.Enabled() {
+		return "", domain.ErrGitHubAppNotConfigured
+	}
+	userID, ok := authctx.UserID(ctx)
+	if !ok {
+		return "", domain.ErrUnauthorized
+	}
+	state, err := s.states.SignAccount(userID)
+	if err != nil {
+		return "", err
+	}
+	return s.client.InstallURL(state), nil
+}
+
 func (s *GitHubAppService) Connect(ctx context.Context, installationID int64, state string) (string, domain.GitHubInstallation, error) {
 	if !s.Enabled() || installationID <= 0 {
 		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
 	}
-	appName, stateUserID, err := s.states.Verify(state)
+	appName, stateUserID, target, err := s.states.VerifyTarget(state)
 	if err != nil {
 		return "", domain.GitHubInstallation{}, err
 	}
@@ -65,8 +82,10 @@ func (s *GitHubAppService) Connect(ctx context.Context, installationID int64, st
 	if !ok || userID != stateUserID {
 		return "", domain.GitHubInstallation{}, domain.ErrGitHubInstallationInvalid
 	}
-	if _, err := s.apps.GetByName(ctx, appName); err != nil {
-		return "", domain.GitHubInstallation{}, err
+	if target == "app" {
+		if _, err := s.apps.GetByName(ctx, appName); err != nil {
+			return "", domain.GitHubInstallation{}, err
+		}
 	}
 	installation, err := s.client.Installation(ctx, installationID)
 	if err != nil {

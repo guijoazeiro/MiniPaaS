@@ -64,8 +64,12 @@ type githubAppTestState struct {
 }
 
 func (f *githubAppTestState) Sign(string, uuid.UUID) (string, error) { return "state", nil }
+func (f *githubAppTestState) SignAccount(uuid.UUID) (string, error)  { return "account-state", nil }
 func (f *githubAppTestState) Verify(string) (string, uuid.UUID, error) {
 	return "private-api", f.userID, nil
+}
+func (f *githubAppTestState) VerifyTarget(string) (string, uuid.UUID, string, error) {
+	return "private-api", f.userID, "app", nil
 }
 
 func TestGitHubAppConnectBindsInstallationToStateUser(t *testing.T) {
@@ -94,5 +98,26 @@ func TestGitHubAppConnectBindsInstallationToStateUser(t *testing.T) {
 	}
 	if !client.called || !installations.upserted {
 		t.Fatal("Connect() with matching user did not complete installation")
+	}
+}
+
+func TestGitHubAppAccountInstallURLRequiresAuthenticatedUser(t *testing.T) {
+	client := &githubAppTestClient{}
+	service := NewGitHubAppService(
+		githubAppTestApps{app: domain.App{ID: uuid.New(), Name: "private-api"}},
+		&githubAppTestInstallations{},
+		client,
+		&githubAppTestState{},
+	)
+	if _, err := service.AccountInstallURL(context.Background()); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("AccountInstallURL() error = %v, want unauthorized", err)
+	}
+	userID := uuid.New()
+	url, err := service.AccountInstallURL(authctx.WithUserID(context.Background(), userID))
+	if err != nil {
+		t.Fatalf("AccountInstallURL() error = %v", err)
+	}
+	if url != "https://github.com/install" {
+		t.Fatalf("AccountInstallURL() = %q", url)
 	}
 }

@@ -96,3 +96,16 @@ func TestStateSignerRejectsExpiredAndTamperedState(t *testing.T) {
 		t.Fatal("expired state was accepted")
 	}
 }
+
+func TestStateSignerSupportsAccountTarget(t *testing.T) {
+	signer := NewStateSigner([]byte("state-secret"))
+	userID := uuid.New()
+	state, err := signer.SignAccount(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appName, gotUserID, target, err := signer.VerifyTarget(state)
+	if err != nil || appName != "" || gotUserID != userID || target != "account" {
+		t.Fatalf("VerifyTarget() = %q/%s/%q, %v", appName, gotUserID, target, err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 type GitHubAppService interface {
 	Enabled() bool
 	InstallURL(ctx context.Context, appName string) (string, error)
+	AccountInstallURL(ctx context.Context) (string, error)
 	Connect(ctx context.Context, installationID int64, state string) (string, domain.GitHubInstallation, error)
 	ListInstallations(ctx context.Context) ([]domain.GitHubInstallation, error)
 	ListRepositories(ctx context.Context, installationID int64) ([]domain.GitHubRepository, error)
@@ -53,6 +54,15 @@ func (h *GitHubAppHandler) InstallURL(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"url": installURL})
 }
 
+func (h *GitHubAppHandler) AccountInstallURL(c *gin.Context) {
+	installURL, err := h.service.AccountInstallURL(c.Request.Context())
+	if err != nil {
+		respondError(c, h.log, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": installURL})
+}
+
 func (h *GitHubAppHandler) Callback(c *gin.Context) {
 	installationID, err := strconv.ParseInt(c.Query("installation_id"), 10, 64)
 	if err != nil || installationID <= 0 || c.Query("state") == "" {
@@ -64,7 +74,10 @@ func (h *GitHubAppHandler) Callback(c *gin.Context) {
 		respondError(c, h.log, err)
 		return
 	}
-	destination := h.dashboardOrigin + "/dashboard/projects/" + url.PathEscape(appName) + "?tab=settings&github=connected"
+	destination := h.dashboardOrigin + "/dashboard/account?github=connected"
+	if appName != "" {
+		destination = h.dashboardOrigin + "/dashboard/projects/" + url.PathEscape(appName) + "?tab=settings&github=connected"
+	}
 	c.Redirect(http.StatusFound, destination)
 }
 

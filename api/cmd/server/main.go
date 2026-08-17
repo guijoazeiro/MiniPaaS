@@ -212,6 +212,7 @@ func main() {
 
 	auth.GET("/integrations/github/status", githubH.Status)
 	auth.GET("/integrations/github/install-url", githubH.InstallURL)
+	auth.GET("/integrations/github/account-install-url", githubH.AccountInstallURL)
 	auth.GET("/integrations/github/callback", githubH.Callback)
 	auth.GET("/integrations/github/installations", githubH.ListInstallations)
 	auth.GET("/integrations/github/installations/:id/repositories", githubH.ListRepositories)
