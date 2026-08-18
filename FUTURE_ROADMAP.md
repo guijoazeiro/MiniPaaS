@@ -170,13 +170,24 @@ This phase adds personal API tokens without weakening the existing dashboard/ses
 
 Use a short-lived token with the smallest required scope in each CI/CD system, store it in the platform's secret manager, and rotate/revoke it when a workflow or person no longer needs access. Long-term token analytics, organization/team roles, and distributed rate limiting remain future improvements.
 
+## Phase 16 — Capacity, deployment queue, and observability
+
+This phase closes the learning project with a small operational layer built on the existing deployment and metrics primitives:
+
+- `MAX_APPS_PER_USER` applies a simple ownership-aware application quota and returns a clear capacity error when it is reached;
+- `MAX_CONCURRENT_BUILDS` is backed by a FIFO in-memory scheduler that reports active and waiting builds and removes cancelled waiters safely;
+- `GET /capacity` exposes non-sensitive application counts, queue counters, and configured container limits for the authenticated owner;
+- the Projects page polls the capacity snapshot alongside application status and shows active builds, queued deployments, and the per-user application limit;
+- existing Docker metrics, request IDs, audit events, persistent build events, and health-check failures remain the observability foundation rather than introducing Prometheus or long-term time-series storage.
+
+The queue is intentionally process-local for this educational project. PostgreSQL remains the source of truth for deployment state, while a restarted API process rebuilds its in-memory scheduler from new deployment work. Distributed queues, historical metrics retention, alerting, and team quotas remain outside the current scope.
+
 ## Later opportunities
 
 These ideas can add value after the core Git and safe-deployment experience is solid:
 
 - Deploy an existing OCI/Docker image without rebuilding source.
 - Docker layer caching or a remote build cache.
-- A deployment queue with per-host concurrency control.
 - Notifications for deployment results through email, Slack, or webhooks.
 - Team accounts, roles, and per-application permissions.
 - Persistent volumes with an explicit backup strategy.
@@ -184,7 +195,6 @@ These ideas can add value after the core Git and safe-deployment experience is s
 - GitLab and generic Git provider support.
 - Application templates for common stacks.
 - Optional buildpack-style detection for projects without a `Dockerfile`; this should come only after Dockerfile-based deployments are mature.
-- Host resource quotas and capacity warnings.
 - Backup verification and disaster-recovery exercises.
 
 ## Recommended order

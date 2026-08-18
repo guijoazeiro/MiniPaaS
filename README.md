@@ -308,6 +308,7 @@ DELETE /me/tokens/:id                 → 204 (session only)
 
 POST   /apps                          { name } → App
 GET    /apps                          → []App
+GET    /capacity                      → current app/build capacity and queue counters
 GET    /apps/:name                    → App (includes current `container_state` when deployed)
 DELETE /apps/:name                    → 204   (stops container, removes Caddy route, removes row)
 POST   /apps/:name/stop               → 204   (stops runtime and route; preserves app configuration and history)
@@ -362,7 +363,7 @@ DELETE /me/tokens/:id   → 204 (revoke immediately)
 
 The available scopes are:
 
-- `read` — read projects, deployments, logs, metrics, Git sources, environment-key names, domains, audit events, and GitHub installation/repository metadata;
+- `read` — read projects, deployments, logs, metrics, capacity, Git sources, environment-key names, domains, audit events, and GitHub installation/repository metadata;
 - `deploy` — upload or trigger deployments, retry/cancel deployments, and roll back;
 - `manage` — create, stop, and delete applications, configure Git sources, environment values, and custom domains.
 
@@ -788,6 +789,7 @@ All configuration lives in environment variables, loaded from `.env` at startup.
 | `GIT_CLONE_TIMEOUT` | no | `10m` | Maximum time allowed for a GitHub clone. |
 | `BUILD_TIMEOUT` | no | `15m` | Maximum time allowed for one Docker image build before the deployment is failed. |
 | `MAX_CONCURRENT_BUILDS` | no | `2` | Maximum number of Docker image builds running in parallel. Additional deployments remain queued until a slot is available. |
+| `MAX_APPS_PER_USER` | no | `20` | Maximum number of applications owned by one user. `0` disables this quota. |
 | `GITHUB_APP_ID` | conditional | — | Numeric App ID used for private repository access. Must be set with the slug and private-key path. |
 | `GITHUB_APP_SLUG` | conditional | — | Slug from the GitHub App settings page. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | conditional | — | Absolute path to the GitHub App private-key PEM. Keep this file outside the repository. |
@@ -808,7 +810,7 @@ Authentication (`/auth/login` and `/auth/web-login`) and the GitHub webhook endp
 
 Every API response includes an `X-Request-ID` UUID. A valid incoming UUID is preserved for correlation; malformed values are replaced. The same ID is included in the structured HTTP request log entry.
 
-When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited. Docker builds are bounded by `BUILD_TIMEOUT` and share the `MAX_CONCURRENT_BUILDS` queue.
+When configured, `CONTAINER_MEMORY_LIMIT_MB`, `CONTAINER_NANO_CPUS`, and `CONTAINER_PIDS_LIMIT` are applied to both new deployments and rollbacks. For NanoCPUs, `1_000_000_000` represents one CPU. A value of `0` leaves that resource unlimited. Docker builds are bounded by `BUILD_TIMEOUT` and share a FIFO `MAX_CONCURRENT_BUILDS` queue. The authenticated `GET /capacity` endpoint and the Projects page expose active builds, queued deployments, application counts, and configured limits. Application creation returns `429` when `MAX_APPS_PER_USER` is reached.
 
 The API also reconciles labeled MiniPaaS containers at startup. It preserves every container referenced by a running deployment or candidate rollout and removes only stale containers with the `com.minipaas.managed=true` label. Containers created outside MiniPaaS are never touched.
 
