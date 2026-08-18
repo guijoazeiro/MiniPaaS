@@ -102,7 +102,7 @@ func main() {
 	apiTokenSvc := service.NewAPITokenService(apiTokenStore)
 	authenticator := service.NewAuthenticator(authSvc, apiTokenSvc)
 	envSvc := service.NewEnvService(envStore, cipher)
-	appSvc := service.NewAppService(appStore)
+	appSvc := service.NewAppService(appStore, service.AppServiceOptions{MaxAppsPerUser: cfg.MaxAppsPerUser})
 	domainSvc := service.NewCustomDomainService(domainStore, appStore, depStore, caddyCli, cfg.BaseDomain, cfg.PublicIP)
 	metricsSvc := service.NewMetricsService(appStore, depStore, depLogStore, dockerCli)
 	depSvc := service.NewDeploymentService(depStore, appStore, rollbackStore, dockerCli, caddyCli, envSvc, cfg.ImageRetention, cfg.RestartPolicy, cfg.RestartMaxRetries, log, service.DeploymentServiceOptions{
@@ -112,6 +112,12 @@ func main() {
 		MaxConcurrentBuilds: cfg.MaxConcurrentBuilds,
 		CustomDomains:       domainSvc,
 		RuntimeLimits:       &docker.ResourceLimits{MemoryBytes: cfg.ContainerMemoryBytes, NanoCPUs: cfg.ContainerNanoCPUs, PidsLimit: cfg.ContainerPidsLimit},
+	})
+	capacitySvc := service.NewCapacityService(appStore, depSvc, service.CapacityOptions{
+		MaxAppsPerUser:            cfg.MaxAppsPerUser,
+		ContainerMemoryLimitBytes: cfg.ContainerMemoryBytes,
+		ContainerNanoCPUs:         cfg.ContainerNanoCPUs,
+		ContainerPidsLimit:        cfg.ContainerPidsLimit,
 	})
 	if err := depSvc.RecoverCandidates(ctx); err != nil {
 		log.Warn("recover deployment candidates", "err", err)
@@ -148,6 +154,7 @@ func main() {
 	appH := handler.NewAppHandler(appSvc, depSvc, healthChecker, log)
 	domainH := handler.NewCustomDomainHandler(domainSvc, log)
 	metricsH := handler.NewMetricsHandler(metricsSvc, log)
+	capacityH := handler.NewCapacityHandler(capacitySvc, log)
 	depH := handler.NewDeploymentHandler(depSvc, appStore, log, cfg.MaxDeploySize, depLogStore, gitDepSvc)
 	gitH := handler.NewGitSourceHandler(gitSourceSvc, gitDepSvc, log, webhooksEnabled)
 	githubH := handler.NewGitHubAppHandler(githubSvc, cfg.DashboardOrigin, log, webhooksEnabled)
@@ -194,6 +201,7 @@ func main() {
 	auth.DELETE("/me/tokens/:id", middleware.RequireSession(), apiTokenH.Revoke)
 	auth.POST("/apps", middleware.RequireScope(domain.APITokenScopeManage), appH.Create)
 	auth.GET("/apps", middleware.RequireScope(domain.APITokenScopeRead), appH.List)
+	auth.GET("/capacity", middleware.RequireScope(domain.APITokenScopeRead), capacityH.Get)
 	auth.GET("/apps/:name", middleware.RequireScope(domain.APITokenScopeRead), appH.Get)
 	auth.POST("/apps/:name/stop", middleware.RequireScope(domain.APITokenScopeManage), appH.Stop)
 	auth.DELETE("/apps/:name", middleware.RequireScope(domain.APITokenScopeManage), appH.Delete)

@@ -92,6 +92,17 @@ func (s *AppStore) List(ctx context.Context) ([]domain.App, error) {
 	return out, nil
 }
 
+// Count returns the number of applications visible to the current identity.
+// It intentionally reuses the ownership-aware List path; the count is used
+// only for the small per-user creation quota.
+func (s *AppStore) Count(ctx context.Context) (int64, error) {
+	apps, err := s.List(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store.CountApps: %w", err)
+	}
+	return int64(len(apps)), nil
+}
+
 func (s *AppStore) UpdateStatus(ctx context.Context, id uuid.UUID, status domain.AppStatus) error {
 	var err error
 	if ownerID, ok := authctx.UserID(ctx); ok {
