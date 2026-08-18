@@ -59,10 +59,6 @@ cd minipaas
 
 Copie a configuração de exemplo:
 
-~~~~powershell
-Copy-Item .env.example .env
-~~~~
-
 ~~~~bash
 cp .env.example .env
 ~~~~
@@ -71,7 +67,7 @@ Na primeira inicialização, a API cria o usuário administrador a partir de ADM
 
 ## Tutorial completo
 
-O fluxo abaixo vai de uma máquina vazia até minip logs hello -f transmitindo logs. Os exemplos da CLI usam PowerShell; no Linux/macOS, troque .\minip.exe por ./minip.
+O fluxo abaixo vai de uma máquina vazia até minip logs hello -f transmitindo logs. Os comandos usam shell POSIX e funcionam em Linux, macOS e Git Bash no Windows.
 
 ### 1. Inicie o PostgreSQL
 
@@ -124,10 +120,10 @@ curl localhost:8080/health
 
 ### 5. Inicie o dashboard
 
-~~~~powershell
+~~~~bash
 cd dashboard
-npm.cmd install
-npm.cmd run dev
+npm install
+npm run dev
 ~~~~
 
 Abra http://localhost:3000. O dashboard usa um cookie HTTP-only criado por POST /auth/web-login; o token não fica exposto ao JavaScript. Mantenha DASHBOARD_ORIGIN=http://localhost:3000. Se a API estiver em outro endereço, crie dashboard/.env.local:
@@ -140,23 +136,23 @@ NEXT_PUBLIC_MINIPAAS_API_URL=http://localhost:8080
 
 ~~~~bash
 cd cli
-go build -o minip.exe .        # Linux/macOS: -o minip
+go build -o minip .
 ~~~~
 
 ### 7. Faça login
 
-~~~~powershell
-.\minip.exe login
+~~~~bash
+./minip login
 ~~~~
 
 Quando solicitado, aceite http://localhost:8080 como host e informe ADMIN_USERNAME/ADMIN_PASSWORD. O sucesso aparece como logged in as admin. O token é salvo em %AppData%\minip\config.json no Windows e ~/.config/minip/config.json no Linux/macOS.
 
 ### 8. Crie uma aplicação e uma variável
 
-~~~~powershell
-.\minip.exe apps create hello
-.\minip.exe env set hello GREETING="hello from minipaas"
-.\minip.exe env list hello
+~~~~bash
+./minip apps create hello
+./minip env set hello GREETING="hello from minipaas"
+./minip env list hello
 ~~~~
 
 env list exibe somente a chave e updated_at. Os valores nunca são retornados pela API. Para conferir o armazenamento:
@@ -171,8 +167,8 @@ A coluna value sempre contém ciphertext, nunca texto puro.
 
 hello-world/ é uma aplicação Node.js mínima que registra um heartbeat a cada segundo no stdout e um evento a cada três segundos no stderr:
 
-~~~~powershell
-.\minip.exe deploy ..\hello-world --app hello --wait
+~~~~bash
+./minip deploy ../hello-world --app hello --wait
 ~~~~
 
 O resultado termina com algo como running on host port 57123, a porta do host mapeada para a porta 8080 do container.
@@ -186,24 +182,24 @@ curl localhost:<porta informada no passo 9>
 
 ### 11. Acompanhe os logs
 
-~~~~powershell
-.\minip.exe logs hello
-.\minip.exe logs hello -f
+~~~~bash
+./minip logs hello
+./minip logs hello -f
 ~~~~
 
-Enquanto -f estiver ativo, faça curl localhost:<porta>/foo em outro terminal. A linha GET /foo aparece ao vivo. Para separar os streams no PowerShell:
+Enquanto -f estiver ativo, faça curl localhost:<porta>/foo em outro terminal. A linha GET /foo aparece ao vivo. Para separar os streams:
 
-~~~~powershell
-.\minip.exe logs hello -f 2>$null  # somente stdout
-.\minip.exe logs hello -f 1>$null  # somente stderr
+~~~~bash
+./minip logs hello -f 2>/dev/null  # somente stdout
+./minip logs hello -f 1>/dev/null  # somente stderr
 ~~~~
 
 Se o container falhar, minip logs ainda recupera a saída persistida do último deploy com erro.
 
 ### 12. Inspecione a aplicação
 
-~~~~powershell
-.\minip.exe apps info hello
+~~~~bash
+./minip apps info hello
 ~~~~
 
 O comando mostra status, estado do container, URL https://hello.<BASE_DOMAIN> e deploys recentes.
@@ -219,21 +215,21 @@ RESTART_POLICY=on-failure
 RESTART_MAX_RETRIES=3
 ~~~~
 
-~~~~powershell
-$container = docker ps --filter "name=minipaas-hello" --format "{{.Names}}" | Select-Object -First 1
-docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' $container
+~~~~bash
+container="$(docker ps --filter "name=minipaas-hello" --format "{{.Names}}" | head -n 1)"
+docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$container"
 # on-failure max=3
 ~~~~
 
 Simule falhas e inspecione o resultado:
 
-~~~~powershell
-1..4 | ForEach-Object {
-  docker kill $container
-  Start-Sleep -Seconds 1
-}
-.\minip.exe apps info hello
-docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' $container
+~~~~bash
+for i in 1 2 3 4; do
+  docker kill "$container"
+  sleep 1
+done
+./minip apps info hello
+docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' "$container"
 ~~~~
 
 O esperado é app e deployment em failed, com container: exited.
@@ -242,25 +238,25 @@ O esperado é app e deployment em failed, com container: exited.
 
 Altere uma mensagem em hello-world/server.js, faça outro deploy e então execute:
 
-~~~~powershell
-.\minip.exe deploy ..\hello-world --app hello --wait
-.\minip.exe rollback hello
-.\minip.exe logs hello -f
-.\minip.exe apps info hello
+~~~~bash
+./minip deploy ../hello-world --app hello --wait
+./minip rollback hello
+./minip logs hello -f
+./minip apps info hello
 ~~~~
 
 Forma não interativa:
 
-~~~~powershell
-.\minip.exe rollback hello --to <deployment-id>
+~~~~bash
+./minip rollback hello --to <deployment-id>
 ~~~~
 
 O rollback reutiliza a imagem Docker armazenada. O candidato é validado antes da troca de rota e o container anterior só é parado após a promoção.
 
 ### 15. Limpe o ambiente
 
-~~~~powershell
-.\minip.exe apps list
+~~~~bash
+./minip apps list
 # Ctrl+C no terminal da API e no terminal do Caddy
 docker compose down
 # docker compose down -v também apaga o volume do banco
@@ -268,8 +264,8 @@ docker compose down
 
 Para remover uma aplicação e seu histórico:
 
-~~~~powershell
-.\minip.exe apps delete hello --yes
+~~~~bash
+./minip apps delete hello --yes
 ~~~~
 
 ## API
@@ -342,17 +338,17 @@ Tokens usam deny-by-default e nunca aumentam as permissões do usuário propriet
 
 Para a CLI e CI/CD, defina MINIPAAS_TOKEN. Ele tem prioridade sobre o token salvo pelo minip login e não é persistido automaticamente:
 
-~~~~powershell
-$env:MINIPAAS_HOST = "http://localhost:8080"
-$env:MINIPAAS_TOKEN = "mpat_..."
-.\minip.exe apps list
-.\minip.exe deploy --git --app hello --wait
+~~~~bash
+export MINIPAAS_HOST="http://localhost:8080"
+export MINIPAAS_TOKEN="mpat_..."
+./minip apps list
+./minip deploy --git --app hello --wait
 ~~~~
 
-~~~~powershell
-.\minip.exe tokens create ci-deploy --scope read --scope deploy --expires-at 2027-01-01T00:00:00Z
-.\minip.exe tokens list
-.\minip.exe tokens revoke <token-id> --yes
+~~~~bash
+./minip tokens create ci-deploy --scope read --scope deploy --expires-at 2027-01-01T00:00:00Z
+./minip tokens list
+./minip tokens revoke <token-id> --yes
 ~~~~
 
 Guarde o segredo em um password manager ou secret store de CI/CD. Nunca o inclua no código, em issues ou nos logs do runner.
@@ -465,9 +461,9 @@ Crie o registro DNS antes de verificar. O hostname é normalizado com IDNA/punyc
 
 Teste local com nip.io:
 
-~~~~powershell
-Resolve-DnsName api.127.0.0.1.nip.io
-curl.exe -i -H "Host: api.127.0.0.1.nip.io" http://localhost/
+~~~~bash
+nslookup api.127.0.0.1.nip.io
+curl -i -H "Host: api.127.0.0.1.nip.io" http://localhost/
 ~~~~
 
 ### Métricas operacionais
@@ -484,9 +480,9 @@ GET /apps/:name/metrics/stream
 
 O backend compartilha um stream Docker por container entre visualizadores. Os dados incluem CPU, memória, rede, disco, PIDs, uptime e restart count. O dashboard mantém uma janela móvel de amostras, reconecta automaticamente e usa o snapshot REST como fallback inicial. Nenhuma série histórica é persistida nesta fase.
 
-Para gerar carga temporária em PowerShell:
+Para gerar carga temporária em outro terminal:
 
-~~~~powershell
+~~~~bash
 docker ps --filter "name=minipaas-nodetest" --format "{{.Names}}"
 docker exec <nome-do-container> node -e "const end=Date.now()+30000; while(Date.now()<end){}"
 ~~~~
@@ -580,14 +576,14 @@ Limites de memória, NanoCPUs e PIDs são aplicados em deploys e rollbacks. O en
 
 Mantenha backups fora do Git. Com o Compose ativo:
 
-~~~~powershell
-New-Item -ItemType Directory -Force backups | Out-Null
-docker compose exec -T postgres pg_dump -U postgres -d minipaas --format=custom > backups/minipaas-$(Get-Date -Format yyyyMMdd-HHmmss).dump
+~~~~bash
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U postgres -d minipaas --format=custom > "backups/minipaas-$(date +%Y%m%d-%H%M%S).dump"
 ~~~~
 
 Para restaurar em um banco descartável:
 
-~~~~powershell
+~~~~bash
 docker compose exec -T postgres createdb -U postgres minipaas_restore
 docker compose cp backups/minipaas-YYYYMMDD-HHMMSS.dump postgres:/tmp/minipaas.restore.dump
 docker compose exec -T postgres pg_restore -U postgres -d minipaas_restore --clean --if-exists /tmp/minipaas.restore.dump
