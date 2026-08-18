@@ -33,6 +33,7 @@ type Config struct {
 	GitCloneTimeout         time.Duration
 	BuildTimeout            time.Duration
 	MaxConcurrentBuilds     int
+	MaxAppsPerUser          int
 	GitHubAppID             int64
 	GitHubAppSlug           string
 	GitHubAppPrivateKeyPath string
@@ -121,6 +122,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxAppsPerUser, err := parseNonNegativeLimit("MAX_APPS_PER_USER", "20", 1_000_000)
+	if err != nil {
+		return nil, err
+	}
 	rateLimitWindow, err := time.ParseDuration(env("RATE_LIMIT_WINDOW", "1m"))
 	if err != nil || rateLimitWindow <= 0 {
 		return nil, fmt.Errorf("config: RATE_LIMIT_WINDOW must be a positive duration")
@@ -176,6 +181,7 @@ func Load() (*Config, error) {
 		GitCloneTimeout:         gitCloneTimeout,
 		BuildTimeout:            buildTimeout,
 		MaxConcurrentBuilds:     maxConcurrentBuilds,
+		MaxAppsPerUser:          int(maxAppsPerUser),
 		GitHubAppID:             githubAppID,
 		GitHubAppSlug:           githubAppSlug,
 		GitHubAppPrivateKeyPath: githubAppKeyPath,

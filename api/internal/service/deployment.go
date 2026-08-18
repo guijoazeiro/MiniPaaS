@@ -88,6 +88,7 @@ type DeploymentService struct {
 	readyTimeout      time.Duration
 	buildTimeout      time.Duration
 	buildSlots        chan struct{}
+	buildQueue        *BuildQueue
 	customDomains     CustomDomainRouteSync
 	runtimeLimits     docker.ResourceLimits
 	executionsMu      sync.Mutex
@@ -136,7 +137,7 @@ func NewDeploymentService(deps DeploymentRepository, apps store.AppStore, rb sto
 		imageRetention: retention, restartPolicy: restartPolicy, restartMaxRetries: restartMaxRetries, log: log, logs: logWriter,
 		canceller: deps, gitDeployments: deps, triggeredGit: deps, readyTimeout: readyTimeout,
 		customDomains: customRoutes, runtimeLimits: runtimeLimits,
-		buildTimeout: buildTimeout, buildSlots: make(chan struct{}, maxConcurrentBuilds),
+		buildTimeout: buildTimeout, buildQueue: NewBuildQueue(maxConcurrentBuilds),
 		executions: make(map[uuid.UUID]*deploymentExecution),
 		rollouts:   make(map[uuid.UUID]chan struct{}),
 	}
@@ -166,16 +167,35 @@ func (s *DeploymentService) beginExecution(ctx context.Context, deploymentID uui
 	return runCtx, done
 }
 
-func (s *DeploymentService) acquireBuild(ctx context.Context) (func(), error) {
+func (s *DeploymentService) acquireBuild(ctx context.Context, deploymentID ...uuid.UUID) (func(), error) {
+	if s.buildQueue != nil {
+		id := uuid.Nil
+		if len(deploymentID) > 0 {
+			id = deploymentID[0]
+		}
+		return s.buildQueue.Acquire(ctx, id)
+	}
 	if s.buildSlots == nil {
 		return func() {}, nil
 	}
 	select {
 	case s.buildSlots <- struct{}{}:
-		return func() { <-s.buildSlots }, nil
+		var once sync.Once
+		return func() { once.Do(func() { <-s.buildSlots }) }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// BuildQueueStats exposes only aggregate scheduler state for capacity views.
+func (s *DeploymentService) BuildQueueStats() domain.BuildQueueStats {
+	if s.buildQueue != nil {
+		return s.buildQueue.Stats()
+	}
+	if s.buildSlots == nil {
+		return domain.BuildQueueStats{}
+	}
+	return domain.BuildQueueStats{Limit: cap(s.buildSlots), Active: len(s.buildSlots)}
 }
 
 func (s *DeploymentService) Cancel(ctx context.Context, deploymentID uuid.UUID) (domain.Deployment, error) {
@@ -293,7 +313,7 @@ func (s *DeploymentService) runBuildWithDockerfile(ctx context.Context, dep doma
 		return err
 	}
 	s.event(ctx, dep.ID, "queued", "system", "Deployment iniciado")
-	releaseBuildSlot, err := s.acquireBuild(ctx)
+	releaseBuildSlot, err := s.acquireBuild(ctx, dep.ID)
 	if err != nil {
 		return s.finishCancelled(ctx, dep, app.ID, "aguardando limite de builds")
 	}

@@ -126,6 +126,16 @@ export type DeploymentPage = {
   total: number;
 };
 
+export type CapacitySnapshot = {
+  apps_total: number;
+  apps_running: number;
+  max_apps_per_user: number;
+  builds: { limit: number; active: number; queued: number };
+  container_memory_limit_bytes: number;
+  container_nano_cpus: number;
+  container_pids_limit: number;
+};
+
 export type DeploymentLog = {
   id: number;
   deployment_id: string;

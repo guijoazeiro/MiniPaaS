@@ -56,6 +56,9 @@ func TestLoadUsesDefaultMaxDeploySize(t *testing.T) {
 	if cfg.BuildTimeout != 15*time.Minute || cfg.MaxConcurrentBuilds != 2 {
 		t.Fatalf("build limits = timeout:%s concurrency:%d, want 15m/2", cfg.BuildTimeout, cfg.MaxConcurrentBuilds)
 	}
+	if cfg.MaxAppsPerUser != 20 {
+		t.Fatalf("MaxAppsPerUser = %d, want 20", cfg.MaxAppsPerUser)
+	}
 	if cfg.RateLimitWindow != time.Minute {
 		t.Fatalf("RateLimitWindow = %s, want 1m", cfg.RateLimitWindow)
 	}

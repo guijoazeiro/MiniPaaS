@@ -6,6 +6,7 @@ var (
 	ErrAppNotFound                   = errors.New("app not found")
 	ErrAppNameTaken                  = errors.New("app name already in use")
 	ErrAppNameInvalid                = errors.New("app name is invalid")
+	ErrAppCapacityExceeded           = errors.New("application capacity limit reached")
 	ErrDeploymentNotFound            = errors.New("deployment not found")
 	ErrDeploymentActive              = errors.New("deployment is already active")
 	ErrDeploymentNotRollbackable     = errors.New("deployment is not eligible for rollback")

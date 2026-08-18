@@ -15,6 +15,8 @@ func respondError(c *gin.Context, log *slog.Logger, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAppNameTaken), errors.Is(err, domain.ErrCustomDomainTaken), errors.Is(err, domain.ErrUsernameTaken), errors.Is(err, domain.ErrGitHubInstallationOwned):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrAppCapacityExceeded):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrDeploymentActive), errors.Is(err, domain.ErrDeploymentNotRollbackable), errors.Is(err, domain.ErrDeploymentNotCancellable), errors.Is(err, domain.ErrDeploymentNotRetryable), errors.Is(err, domain.ErrDeploymentRetryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAppNameInvalid), errors.Is(err, domain.ErrUsernameInvalid), errors.Is(err, domain.ErrPasswordWeak), errors.Is(err, domain.ErrEnvKeyInvalid), errors.Is(err, domain.ErrGitRepositoryInvalid), errors.Is(err, domain.ErrGitRefInvalid), errors.Is(err, domain.ErrGitPathInvalid), errors.Is(err, domain.ErrDockerfileNotFound), errors.Is(err, domain.ErrGitHubInstallationInvalid), errors.Is(err, domain.ErrGitHubRepositoryNotAccessible), errors.Is(err, domain.ErrCustomDomainInvalid), errors.Is(err, domain.ErrAPITokenNameInvalid), errors.Is(err, domain.ErrAPITokenScopeInvalid), errors.Is(err, domain.ErrAPITokenExpiryInvalid):
