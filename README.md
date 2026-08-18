@@ -59,13 +59,8 @@ cd minipaas
 
 Copy the example configuration for your shell:
 
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
 ```bash
-# Linux/macOS
+# Linux, macOS, and Git Bash
 cp .env.example .env
 ```
 
@@ -73,7 +68,7 @@ On first startup the API seeds the admin user from `ADMIN_USERNAME` / `ADMIN_PAS
 
 ## End-to-end walkthrough
 
-Full path from empty machine to `minip logs hello -f` streaming live output. The walkthrough uses PowerShell syntax for the CLI; on Linux/macOS, replace `.\minip.exe` with `./minip`.
+Full path from empty machine to `minip logs hello -f` streaming live output. The commands use POSIX shell syntax and run on Linux, macOS, and Git Bash on Windows.
 
 ### 1. Start Postgres
 
@@ -138,10 +133,10 @@ curl localhost:8080/health
 
 In another terminal, install the dashboard dependencies and start the local control plane:
 
-```powershell
+```bash
 cd dashboard
-npm.cmd install
-npm.cmd run dev
+npm install
+npm run dev
 ```
 
 Open `http://localhost:3000`. The dashboard uses an HTTP-only cookie created by `POST /auth/web-login`; it does not expose the login token to browser JavaScript. The API must keep `DASHBOARD_ORIGIN=http://localhost:3000` (or the exact origin you use). If the API runs on another address, create `dashboard/.env.local` with:
@@ -156,13 +151,13 @@ New terminal:
 
 ```bash
 cd cli
-go build -o minip.exe .        # Linux/macOS: -o minip
+go build -o minip .
 ```
 
 ### 7. Log in
 
-```powershell
-.\minip.exe login
+```bash
+./minip login
 ```
 
 Answers when prompted:
@@ -174,10 +169,10 @@ Success prints `logged in as admin`. The token is stored in the OS user config d
 
 ### 8. Create an app and set an env var
 
-```powershell
-.\minip.exe apps create hello
-.\minip.exe env set hello GREETING="hello from minipaas"
-.\minip.exe env list hello
+```bash
+./minip apps create hello
+./minip env set hello GREETING="hello from minipaas"
+./minip env list hello
 ```
 
 `env list` shows the key + `updated_at`. Values are **never** returned by the API. At-rest check:
@@ -192,8 +187,8 @@ Column `value` is always ciphertext — never plaintext.
 
 The repo ships with a minimal Node.js app under `hello-world/` that logs a heartbeat every second (stdout) and an "even beat" every 3 seconds (stderr).
 
-```powershell
-.\minip.exe deploy ..\hello-world --app hello --wait
+```bash
+./minip deploy ../hello-world --app hello --wait
 ```
 
 Output ends with something like `running on host port 57123`. That's the host port Docker bound to the container's `:8080`.
@@ -211,14 +206,14 @@ You should also see the request logged to the container's stdout in step 10.
 
 Tail the last 100 lines (then exits normally):
 
-```powershell
-.\minip.exe logs hello
+```bash
+./minip logs hello
 ```
 
 Follow mode (streams until `Ctrl+C`):
 
-```powershell
-.\minip.exe logs hello -f
+```bash
+./minip logs hello -f
 ```
 
 While `-f` is running, hit the container again from another terminal:
@@ -227,19 +222,19 @@ While `-f` is running, hit the container again from another terminal:
 curl localhost:<port>/foo
 ```
 
-The `GET /foo` line appears live, interleaved with the heartbeat. To show just one stream in PowerShell:
+The `GET /foo` line appears live, interleaved with the heartbeat. To show just one stream:
 
-```powershell
-.\minip.exe logs hello -f 2>$null  # stdout only
-.\minip.exe logs hello -f 1>$null  # stderr only (the event lines)
+```bash
+./minip logs hello -f 2>/dev/null  # stdout only
+./minip logs hello -f 1>/dev/null  # stderr only (the event lines)
 ```
 
 `-f` first prints the selected tail and then keeps streaming while the container produces output. If a container has crashed, `minip logs` still retrieves the saved output from the latest failed deployment for diagnosis.
 
 ### 12. Inspect the app
 
-```powershell
-.\minip.exe apps info hello
+```bash
+./minip apps info hello
 ```
 
 Shows status, live container state (`running`, `exited`, etc.), public URL (`https://hello.<BASE_DOMAIN>` — served by Caddy), and recent deployments (`running`, `superseded`, `failed`, `rolled_back`).
@@ -257,53 +252,53 @@ RESTART_MAX_RETRIES=3
 
 After deploying `hello`, inspect the policy Docker received:
 
-```powershell
-$container = docker ps --filter "name=minipaas-hello" --format "{{.Names}}" | Select-Object -First 1
-docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' $container
+```bash
+container="$(docker ps --filter "name=minipaas-hello" --format "{{.Names}}" | head -n 1)"
+docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$container"
 # on-failure max=3
 ```
 
 To simulate a crash, kill the container a few times in quick succession:
 
-```powershell
-1..4 | ForEach-Object {
-  docker kill $container
-  Start-Sleep -Seconds 1
-}
+```bash
+for i in 1 2 3 4; do
+  docker kill "$container"
+  sleep 1
+done
 ```
 
 After the restart limit is exhausted, wait at least one health-check interval and inspect the app:
 
-```powershell
-.\minip.exe apps info hello
-docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' $container
+```bash
+./minip apps info hello
+docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' "$container"
 ```
 
-Expected result: the app and deployment become `failed`, and `container: exited` appears in `apps info`. You can still run `.\minip.exe logs hello` to inspect the crash output.
+Expected result: the app and deployment become `failed`, and `container: exited` appears in `apps info`. You can still run `./minip logs hello` to inspect the crash output.
 
 ### 14. Roll back to a previous deployment
 
 Make a visible change to `hello-world/server.js` (e.g. change the heartbeat message), redeploy, then roll back:
 
-```powershell
-.\minip.exe deploy ..\hello-world --app hello --wait     # creates v2, v1 becomes superseded
-.\minip.exe rollback hello                                # interactive picker; select v1
-.\minip.exe logs hello -f                                 # container now runs the old code
-.\minip.exe apps info hello                               # v1 back to running, v2 → rolled_back
+```bash
+./minip deploy ../hello-world --app hello --wait     # creates v2, v1 becomes superseded
+./minip rollback hello                               # interactive picker; select v1
+./minip logs hello -f                                # container now runs the old code
+./minip apps info hello                              # v1 back to running, v2 -> rolled_back
 ```
 
 Non-interactive form:
 
-```powershell
-.\minip.exe rollback hello --to <deployment-id>
+```bash
+./minip rollback hello --to <deployment-id>
 ```
 
 Rollback reuses the target's cached Docker image, so it takes seconds — no rebuild. The target is started as a candidate and checked before the route changes; the previous container is stopped only after the rollback is promoted successfully.
 
 ### 15. Clean up
 
-```powershell
-.\minip.exe apps list                   # inspect remaining apps
+```bash
+./minip apps list                   # inspect remaining apps
 # From the api terminal: Ctrl+C to stop the server
 # From the caddy terminal: Ctrl+C to stop caddy
 docker compose down                     # stop Postgres; keep the volume
@@ -312,8 +307,8 @@ docker compose down                     # stop Postgres; keep the volume
 
 To remove an app and its deployment history, require an explicit confirmation:
 
-```powershell
-.\minip.exe apps delete hello --yes
+```bash
+./minip apps delete hello --yes
 ```
 
 ## API
@@ -398,19 +393,19 @@ Scopes are explicit and deny-by-default for API tokens. A token is always restri
 
 For CLI and CI/CD use, set `MINIPAAS_TOKEN`. It takes precedence over the token saved by `minip login` in `config.json`, and a value read from the environment is never written back automatically:
 
-```powershell
-$env:MINIPAAS_HOST = "http://localhost:8080"
-$env:MINIPAAS_TOKEN = "mpat_..."
-.\minip.exe apps list
-.\minip.exe deploy --git --app hello --wait
+```bash
+export MINIPAAS_HOST="http://localhost:8080"
+export MINIPAAS_TOKEN="mpat_..."
+./minip apps list
+./minip deploy --git --app hello --wait
 ```
 
 Create and revoke tokens from the CLI while authenticated with an existing session:
 
-```powershell
-.\minip.exe tokens create ci-deploy --scope read --scope deploy --expires-at 2027-01-01T00:00:00Z
-.\minip.exe tokens list
-.\minip.exe tokens revoke <token-id> --yes
+```bash
+./minip tokens create ci-deploy --scope read --scope deploy --expires-at 2027-01-01T00:00:00Z
+./minip tokens list
+./minip tokens revoke <token-id> --yes
 ```
 
 The `tokens create` output contains a warning that the secret is shown once. Store it in a password manager or the CI/CD secret store; do not paste it into source control, issue text, build logs, or command-line arguments that may be retained by a runner.
@@ -535,10 +530,10 @@ Phase 9.1 accepts public repositories hosted on `github.com`. The API stores the
 
 Example for a monorepo whose application lives in `services/api`:
 
-```powershell
-.\minip.exe apps connect-github hello --repo owner/repository --branch main --context services/api --dockerfile docker/Dockerfile
-.\minip.exe deploy --git --app hello --wait
-.\minip.exe apps info hello
+```bash
+./minip apps connect-github hello --repo owner/repository --branch main --context services/api --dockerfile docker/Dockerfile
+./minip deploy --git --app hello --wait
+./minip apps info hello
 ```
 
 ### Private repositories with a GitHub App
@@ -556,11 +551,11 @@ Generate a private key for the App, store the PEM outside the repository, and se
 
 The CLI can reuse an installation created through the dashboard:
 
-```powershell
-.\minip.exe apps github-installations
-.\minip.exe apps github-repositories 12345678
-.\minip.exe apps connect-github hello --installation 12345678 --repository-id 987654321 --branch main
-.\minip.exe deploy --git --app hello --wait
+```bash
+./minip apps github-installations
+./minip apps github-repositories 12345678
+./minip apps connect-github hello --installation 12345678 --repository-id 987654321 --branch main
+./minip deploy --git --app hello --wait
 ```
 
 The browser callback requires an authenticated MiniPaaS dashboard session and a signed, short-lived state value bound to the target (account or application) and the MiniPaaS user. Installation ownership is enforced in PostgreSQL, so the same GitHub installation cannot be silently claimed by another MiniPaaS user.
@@ -581,9 +576,9 @@ In the GitHub App settings:
 
 During local development, GitHub cannot call `localhost` directly. With the API running on port `8080`, open another terminal and start a temporary HTTPS tunnel using the Wrangler already installed by the dashboard:
 
-```powershell
+```bash
 cd dashboard
-npx.cmd wrangler tunnel quick-start http://localhost:8080
+npx wrangler tunnel quick-start http://localhost:8080
 ```
 
 Wrangler prints a temporary public URL similar to:
@@ -602,8 +597,8 @@ Keep the tunnel terminal open while testing. A quick-tunnel URL changes whenever
 
 After restarting the API, enable auto-deploy from **Projeto → Configurações → GitHub** or with:
 
-```powershell
-.\minip.exe apps auto-deploy hello on
+```bash
+./minip apps auto-deploy hello on
 ```
 
 MiniPaaS validates `X-Hub-Signature-256` with HMAC-SHA256 before processing the body, deduplicates deliveries using `X-GitHub-Delivery`, and only starts a deployment when repository, installation, and branch all match. Deleting a branch, pushing another branch, or replaying the same delivery does not create another deployment. Releases created from a push expose `trigger_type=webhook` and their GitHub delivery ID.
@@ -620,13 +615,13 @@ GET /apps/:name/deployments/:id/logs?after=0&limit=500
 
 In the dashboard, open **Deployments → Logs de build** for a release. The CLI exposes the same history without starting a live stream:
 
-```powershell
-.\minip.exe logs hello --deployment <deployment-id>
+```bash
+./minip logs hello --deployment <deployment-id>
 ```
 
 Apply migration 010 before starting the API:
 
-```powershell
+```bash
 cd api
 go run ./cmd/migrate up
 ```
@@ -639,7 +634,7 @@ Retries create a new deployment linked to the previous one through `retry_of` an
 
 Apply migration 011 before starting the API:
 
-```powershell
+```bash
 cd api
 go run ./cmd/migrate up
 ```
@@ -660,7 +655,7 @@ Candidate container and port metadata is persisted by migration 012. On API star
 
 Apply the migration before starting the API:
 
-```powershell
+```bash
 cd api
 go run ./cmd/migrate up
 ```
@@ -684,16 +679,16 @@ Hostnames are normalized with IDNA to DNS-compatible punycode before validation,
 
 For a local-only test, `nip.io` maps a hostname to an IP encoded in the name. With the API and Caddy running on the same machine, add `api.127.0.0.1.nip.io` in **Configurações → Domínios customizados**, verify it, and test the route:
 
-```powershell
-Resolve-DnsName api.127.0.0.1.nip.io
-curl.exe -i -H "Host: api.127.0.0.1.nip.io" http://localhost/
+```bash
+nslookup api.127.0.0.1.nip.io
+curl -i -H "Host: api.127.0.0.1.nip.io" http://localhost/
 ```
 
 The application must be listening on the internal port expected by its Dockerfile/runtime (`8080` by default). For example, a `PORT=9000` environment variable makes the container listen on a different port and results in a Caddy `502 Bad Gateway` until the application is changed back to `PORT=8080` or the runtime port contract is updated.
 
 Apply migration 013 before starting the API:
 
-```powershell
+```bash
 cd api
 go run ./cmd/migrate up
 ```
@@ -744,9 +739,9 @@ The WebSocket frame has this shape:
 }
 ```
 
-To validate the live stream locally, keep the API and dashboard running, open **Métricas**, select an application with a running container, and generate temporary CPU load in another PowerShell terminal:
+To validate the live stream locally, keep the API and dashboard running, open **Métricas**, select an application with a running container, and generate temporary CPU load in another terminal:
 
-```powershell
+```bash
 docker ps --filter "name=minipaas-nodetest" --format "{{.Names}}"
 docker exec <container-name> node -e "const end=Date.now()+30000; while(Date.now()<end){}"
 ```
@@ -861,14 +856,14 @@ The API also reconciles labeled MiniPaaS containers at startup. It preserves eve
 
 Keep backups outside Git (the repository ignores `backups/`). With the local Compose database running:
 
-```powershell
-New-Item -ItemType Directory -Force backups | Out-Null
-docker compose exec -T postgres pg_dump -U postgres -d minipaas --format=custom > backups/minipaas-$(Get-Date -Format yyyyMMdd-HHmmss).dump
+```bash
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U postgres -d minipaas --format=custom > "backups/minipaas-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
 To restore into a disposable or maintenance database, stop the API first, create the target database, and use:
 
-```powershell
+```bash
 docker compose exec -T postgres createdb -U postgres minipaas_restore
 docker compose cp backups/minipaas-YYYYMMDD-HHMMSS.dump postgres:/tmp/minipaas.restore.dump
 docker compose exec -T postgres pg_restore -U postgres -d minipaas_restore --clean --if-exists /tmp/minipaas.restore.dump
