@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime, stateLabel, request } from "../lib/api";
-import type { Deployment, DeploymentPage } from "../types";
+import type { CapacitySnapshot, Deployment, DeploymentPage } from "../types";
 import { useDashboard } from "./DashboardShell";
 
 export function ProjectsPage() {
@@ -11,6 +11,7 @@ export function ProjectsPage() {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [capacity, setCapacity] = useState<CapacitySnapshot | null>(null);
   const deploymentRequest = useRef<Promise<void> | null>(null);
 
   const loadDeployments = useCallback(() => {
@@ -29,24 +30,30 @@ export function ProjectsPage() {
     return promise;
   }, []);
 
+  const loadCapacity = useCallback(() => request<CapacitySnapshot>("/capacity").then(setCapacity), []);
+
   useEffect(() => {
-    const initialTimer = window.setTimeout(() => void loadDeployments().catch(() => undefined), 0);
+    const initialTimer = window.setTimeout(() => {
+      void loadDeployments().catch(() => undefined);
+      void loadCapacity().catch(() => undefined);
+    }, 0);
     const timer = window.setInterval(() => void loadDeployments().catch(() => undefined), 5000);
-    return () => { window.clearTimeout(initialTimer); window.clearInterval(timer); };
-  }, [loadDeployments]);
+    const capacityTimer = window.setInterval(() => void loadCapacity().catch(() => undefined), 5000);
+    return () => { window.clearTimeout(initialTimer); window.clearInterval(timer); window.clearInterval(capacityTimer); };
+  }, [loadCapacity, loadDeployments]);
 
   const refreshProjects = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await Promise.all([refreshApps(), loadDeployments()]);
+      await Promise.all([refreshApps(), loadDeployments(), loadCapacity()]);
       setLastUpdated(new Date());
     } catch (cause: unknown) {
       setFeedback(cause instanceof Error ? cause.message : "Não foi possível atualizar os projetos.", "error");
     } finally {
       setRefreshing(false);
     }
-  }, [loadDeployments, refreshApps, refreshing, setFeedback]);
+  }, [loadCapacity, loadDeployments, refreshApps, refreshing, setFeedback]);
 
   const latestByApp = useMemo(() => {
     const latest = new Map<string, Deployment>();
@@ -73,6 +80,18 @@ export function ProjectsPage() {
         <article><span>Requer atenção</span><strong>{attention}</strong><small>projetos com falha</small></article>
         <article><span>Parados</span><strong>{stopped}</strong><small>execução interrompida</small></article>
       </section>
+
+      {capacity && <section className="panel capacity-summary" aria-label="Capacidade da plataforma">
+        <div className="section-heading">
+          <div><p className="eyebrow">OPERAÇÃO</p><h2>Capacidade da plataforma</h2><p>Acompanhamento leve da fila e dos limites configurados.</p></div>
+          <small className="muted">Atualizado junto com os projetos</small>
+        </div>
+        <div className="capacity-grid">
+          <article><span>Builds ativos</span><strong>{capacity.builds.active}/{capacity.builds.limit}</strong><small>{capacity.builds.queued ? `${capacity.builds.queued} na fila` : "fila vazia"}</small></article>
+          <article><span>Aplicações</span><strong>{capacity.apps_total}{capacity.max_apps_per_user ? `/${capacity.max_apps_per_user}` : ""}</strong><small>{capacity.apps_running} em execução</small></article>
+          <article><span>Fila de deployments</span><strong>{capacity.builds.queued}</strong><small>{capacity.builds.queued === 1 ? "deployment aguardando" : "deployments aguardando"}</small></article>
+        </div>
+      </section>}
 
       <section className="panel project-directory">
         <div className="directory-heading">
