@@ -1,8 +1,21 @@
 # MiniPaaS
 
-A self-hosted deployment platform inspired by Render and Railway. Deploy containerized applications via CLI or dashboard, with automatic subdomains, HTTPS, real-time log streaming, and rollback — all running on a single VPS.
+[Leia esta documentação em português (Brasil)](README.pt-BR.md)
 
-> Portfolio project. Built to exercise production-grade backend patterns: Docker orchestration, dynamic reverse proxy management, encrypted secrets, WebSocket streaming, and a CLI-first API validated before any UI is written.
+A self-hosted deployment control plane inspired by Render and Railway. MiniPaaS deploys Dockerfile-based applications from a local archive or GitHub, publishes them behind Caddy with automatic HTTPS, and exposes the complete lifecycle through both a CLI and a dashboard.
+
+This is a finished educational portfolio project: the scope is intentionally focused on one host and a small operational surface, while still exercising the backend patterns found in real infrastructure products. The implementation includes deployments, GitHub integration, zero-downtime promotion, encrypted environment variables, live logs and metrics, multi-user ownership, API tokens, capacity limits, and a visible deployment queue.
+
+## What this project demonstrates
+
+- **Control-plane architecture:** Gin handlers, application services, domain types, PostgreSQL stores, versioned migrations, and generated `sqlc` queries are kept in separate layers.
+- **Container orchestration:** Docker image builds, candidate containers, readiness checks, restart policies, cleanup, rollback, and safe route promotion are coordinated without Kubernetes.
+- **Asynchronous workflows:** deployments run in the background with context cancellation, bounded Docker build concurrency, FIFO queueing, retry, and cancellation states.
+- **Secure configuration:** environment values are encrypted with AES-256-GCM, credentials use bcrypt, dashboard sessions use HTTP-only cookies, and automation uses scoped `mpat_` tokens stored only as hashes.
+- **Real-time operation:** WebSockets stream runtime logs and shared Docker metrics; persistent build events keep completed deployment history inspectable.
+- **Multi-user boundaries:** applications, deployments, logs, metrics, GitHub installations, domains, and audit events are owner-scoped.
+- **Infrastructure integration:** Caddy's Admin API manages routes at runtime, while GitHub Apps and signed webhooks enable private repositories and auto-deploy.
+- **Operational safety:** request IDs, audit events, rate limiting, readiness probes, health checks, resource limits, application quotas, capacity snapshots, and orphan-container reconciliation are included.
 
 ## Stack
 
@@ -20,6 +33,19 @@ A self-hosted deployment platform inspired by Render and Railway. Deploy contain
 | Metrics streaming | Docker stats + gorilla/websocket | Shared per-container snapshots for live CPU, memory, network, and disk charts |
 | CLI | Go + Cobra | Single-binary target, easy release |
 | Dashboard | Next.js 16 / Vinext (App Router) | Route-based control plane consuming the same API as the CLI |
+
+The same HTTP API is the contract for the dashboard, CLI, GitHub webhooks, and CI/CD automation. This keeps authentication, ownership, validation, and deployment behavior consistent across every entry point.
+
+## Feature map
+
+| Area | Included capabilities |
+|---|---|
+| Deployments | Tar uploads, public/private GitHub repositories, Dockerfile validation, build logs, retries, cancellation, rollback, zero-downtime candidate promotion |
+| Runtime | Docker restart policies, TCP readiness checks, automatic subdomains, Caddy route lifecycle, custom domains and HTTPS |
+| Observability | Live stdout/stderr logs, persisted build events, Docker metrics streams, project metrics, health-check failures, request IDs and audit trail |
+| Security | JWT login, HTTP-only dashboard session, bcrypt passwords, ownership isolation, AES-256-GCM environment values, scoped API tokens, rate limits |
+| Operations | FIFO build queue, per-user application quota, CPU/memory/PID caps, capacity endpoint, startup reconciliation and safe destructive deletion |
+| Interfaces | Cobra CLI, dashboard routes for projects/deployments/logs/metrics/account, GitHub App installation flow, CI/CD examples |
 
 ## Quick start
 
@@ -175,7 +201,7 @@ Output ends with something like `running on host port 57123`. That's the host po
 ### 10. Sanity-check the container
 
 ```bash
-curl localhost:<the port from step 8>
+curl localhost:<the port from step 9>
 # hello
 ```
 
@@ -232,7 +258,8 @@ RESTART_MAX_RETRIES=3
 After deploying `hello`, inspect the policy Docker received:
 
 ```powershell
-docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' minipaas-hello
+$container = docker ps --filter "name=minipaas-hello" --format "{{.Names}}" | Select-Object -First 1
+docker inspect --format '{{.HostConfig.RestartPolicy.Name}} max={{.HostConfig.RestartPolicy.MaximumRetryCount}}' $container
 # on-failure max=3
 ```
 
@@ -240,7 +267,7 @@ To simulate a crash, kill the container a few times in quick succession:
 
 ```powershell
 1..4 | ForEach-Object {
-  docker kill minipaas-hello
+  docker kill $container
   Start-Sleep -Seconds 1
 }
 ```
@@ -249,7 +276,7 @@ After the restart limit is exhausted, wait at least one health-check interval an
 
 ```powershell
 .\minip.exe apps info hello
-docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' minipaas-hello
+docker inspect --format '{{.State.Status}} restartCount={{.RestartCount}}' $container
 ```
 
 Expected result: the app and deployment become `failed`, and `container: exited` appears in `apps info`. You can still run `.\minip.exe logs hello` to inspect the crash output.
@@ -436,7 +463,7 @@ pending → cancel_requested → cancelled
 building → cancel_requested → cancelled
                    ↘ failed     (build or start failed)
 running           → superseded  (replaced by a newer deploy)
-                  → rolled_back (intentional rollback — phase 5)
+                  → rolled_back (intentional rollback)
                   → failed      (container exited, dead, or missing — health check)
                   → stopped     (manually stopped; application data is preserved)
 ```
@@ -726,6 +753,22 @@ docker exec <container-name> node -e "const end=Date.now()+30000; while(Date.now
 
 Replace `<container-name>` with the value returned by the first command. The CPU card and chart should change during the 30-second workload. The dashboard updates from the WebSocket stream, while the project overview continues to use the snapshot endpoint.
 
+### Capacity, deployment queue, and observability (Phase 16)
+
+The final operational increment keeps the platform intentionally small while making its limits visible. Set `MAX_APPS_PER_USER` to enforce an ownership-aware application quota; `0` disables the quota. When the limit is reached, application creation returns `429 Too Many Requests` instead of silently overcommitting the instance.
+
+Docker builds use a FIFO in-memory scheduler bounded by `MAX_CONCURRENT_BUILDS`. A deployment waiting for a slot remains `pending` and appears as **Na fila** in the dashboard and CLI. Cancelling a pending deployment removes its waiter safely; active builds continue to respect their build timeout and cancellation context.
+
+The authenticated capacity snapshot is available at:
+
+```text
+GET /capacity
+```
+
+It reports the current user's application count, the configured application quota, active and queued builds, the concurrency limit, and configured container resource caps. The Projects page polls this endpoint together with application status and displays the result in **Capacidade da plataforma** without a full page reload.
+
+The queue is deliberately process-local because MiniPaaS is designed here as a single-host learning project. PostgreSQL remains the source of truth for deployment records; distributed queues, long-term metrics retention, alerting, team roles, and multi-host scheduling are outside this final scope.
+
 ## Project layout
 
 ```
@@ -737,14 +780,14 @@ minipaas/
 │   ├── internal/
 │   │   ├── config/                    # env → struct + CADDY_ADMIN_URL localhost validation
 │   │   ├── domain/                    # pure types + sentinel errors
-│   │   ├── store/                     # store interfaces (App, Deployment, User, Env)
+│   │   ├── store/                     # ownership-aware store interfaces and PostgreSQL adapters
 │   │   │   └── postgres/              # concrete stores (+ sqlc/ generated code)
 │   │   ├── docker/                    # Docker Engine wrapper (build, run, stop, logs)
 │   │   ├── caddy/                     # Caddy Admin API wrapper (route upsert/remove)
 │   │   ├── crypto/                    # AES-256-GCM cipher
 │   │   ├── health/                    # periodic Docker inspection + failure detection
 │   │   ├── ws/                        # WebSocket logs + shared metrics streams
-│   │   ├── service/                   # business logic (app, deployment, auth, env)
+│   │   ├── service/                   # business logic, queue, metrics, auth, GitHub and deployments
 │   │   └── handler/                   # Gin handlers + JWT middleware
 │   ├── sql/
 │   │   ├── migrations/                # golang-migrate files (*.up.sql / *.down.sql)
@@ -757,7 +800,7 @@ minipaas/
 │   │   ├── config/                    # ~/.config/minip/config.json (0600)
 │   │   └── tarball/                   # dir → tar packer
 │   └── main.go
-├── dashboard/                         # Next.js UI (phase 7)
+├── dashboard/                         # Next.js route-based control plane
 ├── hello-world/                       # sample Node.js app used by the walkthrough
 ├── Caddyfile                          # minimal — enables the admin API
 ├── docker-compose.yml                 # Postgres for local dev
@@ -868,6 +911,7 @@ The default automated tests are unit tests, so they do not require Docker or Pos
 ```bash
 # From the repo root — runs the api module tests
 go test ./...
+go vet ./...
 
 # CLI module (separate go.mod)
 cd cli && go test ./...
@@ -875,6 +919,7 @@ cd cli && go test ./...
 # Dashboard (from dashboard/)
 npm test
 npm run lint
+npm run build
 
 # Both
 go test ./... && (cd cli && go test ./...)
@@ -891,15 +936,23 @@ Coverage today:
 - `ws` — line splitter + end-to-end WS handler with a fake Docker stream (via `stdcopy.NewStdWriter`) proving demux, ordering, and frame format
 - `docker` / `ws` — CPU calculation, network/disk aggregation, and shared metrics-stream subscription coverage
 - `handler/middleware` — request IDs and concurrent rate-limit enforcement
-- `handler` — readiness responses for healthy and failed dependencies
+- `handler` — readiness responses, capacity snapshots, and explicit quota-exhaustion errors
 - `service` — rollout serialization and safe managed-container reconciliation
+- `service` — FIFO build queue ordering/cancellation, application quotas, and capacity snapshots
 - `health` — exited/missing containers transition their deployment and app to `failed`; current container state lookup
 - `cli/tarball` — kept/skipped paths, slash-normalized entries
 - `store/postgres` (integration tag) — app persistence, uniqueness constraints, status and public URL updates against a real PostgreSQL instance
 
 `-race` needs CGO (not enabled on Windows by default); CI runs it on Linux. GitHub Actions also vets the API, runs the CLI and dashboard checks, applies the migrations, and runs the PostgreSQL integration test.
 
-### Releases
+### CI and releases
+
+The repository includes two workflows:
+
+- **CI** runs API vetting and race-enabled tests on Linux, applies the migrations against PostgreSQL, executes the PostgreSQL integration suite, tests the CLI, and runs dashboard lint/build tests.
+- **Release** runs when a `v*` tag is pushed and publishes cross-platform API server, migration, and CLI binaries for Linux amd64, macOS amd64/arm64, and Windows amd64.
+
+### Release artifacts
 
 Pushing a tag in the `v*` format (for example, `v0.1.0`) starts the release workflow. It builds the API server, migration command, and CLI for Linux amd64, macOS amd64/arm64, and Windows amd64, then creates a GitHub release with those binaries.
 
